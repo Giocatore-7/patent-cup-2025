@@ -10,34 +10,47 @@ import os
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
-# ★【修正1】コード内からパスワードを完全削除
-# 金庫(Secrets)の設定がないとエラーになり、コードを見てもパスワードはわかりません
+# ★【修正】コード内からパスワードを完全削除
+# Secrets（金庫）から読み込めない場合は、エラーを出してアプリを停止します。
+# これにより、GitHub上のコードを見てもパスワードは一切分かりません。
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
     VIEW_PASS = st.secrets["VIEW_PASS"]
     RESET_PASS = st.secrets["RESET_PASS"]
 except (FileNotFoundError, KeyError):
-    st.error("⚠️ エラー: StreamlitのSecrets設定が見つかりません。管理画面でパスワードを設定してください。")
-    st.stop()
+    st.error("⛔ セキュリティエラー: パスワード設定が見つかりません。")
+    st.info("管理者の方へ: Streamlit Community Cloudの「Settings > Secrets」にて、ADMIN_PASS, VIEW_PASS, RESET_PASS を設定してください。")
+    st.stop() # アプリをここで強制停止
 
-# ★【修正2 & 3】アイコン非表示 ＆ タブの固定表示(Sticky)
+# ★ CSS設定（アイコン非表示 ＆ タブ固定）
 st.markdown("""
     <style>
-    /* 右上のGitHubアイコンとメニューを隠す */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    .stAppDeployButton {display:none;}
+    /* 1. 右上のツールバー（GitHubアイコン、点々メニューなど）だけを消す */
+    [data-testid="stToolbar"] {
+        visibility: hidden !important;
+        display: none !important;
+    }
+    
+    /* Deployボタンを消す */
+    .stAppDeployButton {
+        display: none !important;
+    }
+    
+    /* フッター（Made with Streamlit）を消す */
+    footer {
+        visibility: hidden;
+    }
 
-    /* タブを画面上に固定する設定 */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
-        background-color: white;
+    /* 2. タブをスクロール追従（Sticky）させる */
+    div[data-baseweb="tab-list"] {
         position: sticky;
-        top: 0px;
+        top: 3.5rem;
         z-index: 999;
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-        box-shadow: 0 4px 2px -2px gray; /* 下に影をつけて浮いているように見せる */
+        background-color: white;
+        padding-top: 10px;
+        padding-bottom: 0px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #f0f0f0;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -231,7 +244,7 @@ def init_session_state():
         
         st.session_state.initialized = True
 
-    # URLパラメータによる自動ログイン（再読み込み対策）
+    # URLパラメータによる自動ログイン
     query_params = st.query_params
     if st.session_state.auth_status is None:
         role = query_params.get("role")
