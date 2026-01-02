@@ -8,7 +8,7 @@ import os
 # ==========================================
 # 1. 設定・データ定義
 # ==========================================
-st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
 # パスワード管理
 try:
@@ -17,46 +17,26 @@ try:
     RESET_PASS = st.secrets["RESET_PASS"]
 except (FileNotFoundError, KeyError):
     st.error("⛔ セキュリティエラー: パスワード設定が見つかりません。")
-    st.info("管理者の方へ: Streamlit Community Cloudの「Settings > Secrets」にてパスワードを設定してください。")
     st.stop()
 
-# ★【修正】CSS設定（安全第一・個別撃破版）
+# ★【修正】CSS設定（アイコン隠しのみ。タブ固定やサイドバー操作は削除）
 st.markdown("""
     <style>
-    /* --- 1. 右上のアイコン類だけを「非表示」にする --- */
-    /* ヘッダー全体はいじらず、中の要素だけを消します */
-    
-    /* 右上のツールバー（GitHubアイコン、3点リーダー） */
+    /* 右上のツールバーを消す */
     [data-testid="stToolbar"] {
         display: none !important;
     }
-    
-    /* Deployボタン */
+    /* Deployボタンを消す */
     .stAppDeployButton {
         display: none !important;
     }
-    
-    /* ヘッダーの装飾（虹色の線） */
-    [data-testid="stDecoration"] {
-        display: none !important;
-    }
-
-    /* フッター（Made with Streamlit） */
+    /* フッターを消す */
     footer {
         display: none !important;
     }
-
-    /* --- 2. タブをスクロール時に画面上に固定する（Sticky） --- */
-    
-    /* タブのリスト部分の設定 */
-    .stTabs [data-baseweb="tab-list"] {
-        position: sticky;
-        top: 3rem; /* ヘッダーの高さ分（約50-60px）空ける */
-        z-index: 100; /* 他の要素より手前に */
-        background-color: white; /* 背景を白くして透けないように */
-        padding-top: 1rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid #ddd;
+    /* ヘッダーの装飾を消す */
+    [data-testid="stDecoration"] {
+        display: none !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -363,8 +343,6 @@ def resolve_tournament_team(league, cup, round_name, ranks_list, match_id_prefix
 def render_match_card(league_type, title, match_id, team_l, team_r, court, is_admin):
     res, _, _ = get_tourn_match_result(match_id)
     header_color = "#FFF0F5" if league_type == "mix" else "#E6F3FF"
-    
-    # コート名に「コート」を追加
     header_text = f"{title} @ {court}コート"
     
     with st.container(border=True):
@@ -464,13 +442,15 @@ def render_graphviz_bracket(cup_name, team_list, league, league_label):
 # ==========================================
 init_session_state()
 
-# --- 管理者設定パネル ---
+# --- メイン画面上部の管理者設定（サイドバー廃止） ---
 if check_password():
     is_admin = (st.session_state.auth_status == "admin")
-    st.sidebar.title("大会設定")
+    
+    # ★【修正】管理者なら、メイン画面の最上部に設定パネルを表示
     if is_admin:
-        with st.sidebar.expander("⚙️ 管理者メニュー"):
-            st.markdown("### タイトル")
+        with st.expander("⚙️ 管理者設定 (設定・リセット)", expanded=False):
+            # 1. タイトル
+            st.markdown("##### タイトル設定")
             if not st.session_state.edit_mode_title:
                 st.info(st.session_state.app_title)
                 if st.button("編集", key="btn_ti"): st.session_state.edit_mode_title=True; st.rerun()
@@ -478,8 +458,11 @@ if check_password():
                 nt = st.text_input("タイトル", st.session_state.app_title)
                 if st.button("保存", key="sv_ti"): 
                     st.session_state.app_title=nt; save_data_to_json(); st.session_state.edit_mode_title=False; st.rerun()
+            
             st.markdown("---")
-            st.markdown("### コート数")
+            
+            # 2. コート数
+            st.markdown("##### コート数設定")
             if not st.session_state.edit_mode_court:
                 st.info(f"現在: {st.session_state.court_mode}")
                 if st.button("編集", key="btn_ct"): st.session_state.edit_mode_court=True; st.rerun()
@@ -487,24 +470,31 @@ if check_password():
                 nc = st.radio("選択", ["4面", "3面"], index=0 if st.session_state.court_mode=="4面" else 1)
                 if st.button("保存", key="sv_ct"): 
                     st.session_state.court_mode=nc; save_data_to_json(); st.session_state.edit_mode_court=False; st.rerun()
+            
             st.markdown("---")
-            st.markdown("### 時間・スケジュール")
+            
+            # 3. 時間・スケジュール
+            st.markdown("##### 時間・スケジュール設定")
             if not st.session_state.edit_mode_settings:
                 st.write(f"開始 {st.session_state.start_time_hour}:{st.session_state.start_time_minute:02d}")
                 if st.button("編集", key="btn_tm"): st.session_state.edit_mode_settings=True; st.rerun()
             else:
-                nh = st.number_input("開始(時)", 0, 23, st.session_state.start_time_hour)
-                nm = st.number_input("開始(分)", 0, 59, st.session_state.start_time_minute)
-                n_ld = st.number_input("リーグ時間(分)", 1, 30, st.session_state.league_duration)
-                n_iv = st.number_input("インターバル(分)", 0, 60, st.session_state.interval_duration)
-                n_td = st.number_input("トーナメント時間(分)", 1, 30, st.session_state.tourn_duration)
+                c1, c2, c3 = st.columns(3)
+                nh = c1.number_input("開始(時)", 0, 23, st.session_state.start_time_hour)
+                nm = c2.number_input("開始(分)", 0, 59, st.session_state.start_time_minute)
+                n_ld = c3.number_input("リーグ時間(分)", 1, 30, st.session_state.league_duration)
+                n_iv = c1.number_input("インターバル(分)", 0, 60, st.session_state.interval_duration)
+                n_td = c2.number_input("トーナメント時間(分)", 1, 30, st.session_state.tourn_duration)
                 if st.button("保存", key="sv_tm"):
                     st.session_state.start_time_hour = nh; st.session_state.start_time_minute = nm
                     st.session_state.league_duration = n_ld; st.session_state.interval_duration = n_iv
                     st.session_state.tourn_duration = n_td
                     save_data_to_json(); st.session_state.edit_mode_settings = False; st.rerun()
+            
             st.markdown("---")
-            st.markdown("### チーム名")
+            
+            # 4. チーム名
+            st.markdown("##### チーム名設定")
             if not st.session_state.edit_mode_teams:
                 if st.button("編集", key="btn_te"): st.session_state.edit_mode_teams=True; st.rerun()
             else:
@@ -519,14 +509,13 @@ if check_password():
                         st.form_submit_button("保存")
                 if st.button("編集完了（保存）", key="en_te"): 
                     save_data_to_json(); st.session_state.edit_mode_teams=False; st.rerun()
-        
-        # ★【追加】完全初期化機能（爆弾削除）
-        st.markdown("---")
-        with st.expander("データの完全初期化"):
-            st.error("【注意】全ての試合結果と設定を削除し、初期状態に戻します。元に戻すことはできません。")
+
+            # 5. データの完全初期化
+            st.markdown("---")
+            st.error("【危険】データの完全初期化")
+            st.caption("全ての試合結果と設定を削除し、初期状態に戻します。元に戻すことはできません。")
             confirm_pass = st.text_input("実行するにはリセット用パスワードを入力", type="password", key="reset_pass")
             if st.button("初期化を実行する", type="primary"):
-                # ここで RESET_PASS と一致するかチェック
                 if confirm_pass == RESET_PASS:
                     if os.path.exists(DATA_FILE):
                         os.remove(DATA_FILE)
@@ -535,16 +524,24 @@ if check_password():
                     st.rerun()
                 else:
                     st.error("パスワードが違います")
-    else:
-        st.sidebar.info(f"コート: {st.session_state.court_mode}")
-            
-    if st.sidebar.button("ログアウト"): 
-        st.session_state.auth_status = None
-        st.query_params.clear() 
-        st.rerun()
 
-    # === メイン画面 ===
+        # ログアウトボタン（管理者用）
+        if st.button("ログアウト", key="admin_logout"):
+            st.session_state.auth_status = None
+            st.query_params.clear()
+            st.rerun()
+            
+    else:
+        # 閲覧者用のログアウトボタン（画面右上あたりに配置したいが、シンプルにタイトル下に配置）
+        if st.button("ログアウト", key="viewer_logout"):
+            st.session_state.auth_status = None
+            st.query_params.clear()
+            st.rerun()
+
+    # === メインコンテンツ ===
     st.title(f"⚽ {st.session_state.app_title}")
+    
+    # タブの表示
     tab1, tab2, tab3, tab4 = st.tabs(["📊 順位表", "📝 リーグ戦入力", "🏆 トーナメント入力", "🌲 トーナメント表"])
     
     df_reg = calculate_standings("reg")
