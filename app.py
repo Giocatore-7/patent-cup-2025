@@ -21,44 +21,51 @@ except (FileNotFoundError, KeyError):
     st.info("管理者の方へ: Streamlit Community Cloudの「Settings > Secrets」にてパスワードを設定してください。")
     st.stop()
 
-# ★【修正】CSS設定（サイドバーボタンを守りつつ、他を隠す ＆ タブ固定）
+# ★【修正】CSS設定（サイドバーボタン保護 ＆ タブ吸着の強化）
 st.markdown("""
     <style>
-    /* --- 1. 不要なアイコンだけをピンポイントで消す --- */
+    /* --- 1. 不要なものを消しつつ、サイドバーボタンを守る --- */
     
-    /* 右上の「Deploy」ボタンを消す */
+    /* 右上のツールバー（3点リーダーなど）を消す */
+    [data-testid="stToolbar"] {
+        display: none !important;
+    }
+    
+    /* 右上のDeployボタンを消す */
     .stAppDeployButton {
         display: none !important;
     }
-    /* 右上の「3点リーダー（メニュー）」などのボタン群を消す */
-    /* stToolbar全体を消すとサイドバーボタンに影響する恐れがあるため、中身のボタンを消します */
-    [data-testid="stToolbar"] button {
-        display: none !important;
-    }
-    /* ヘッダーの装飾（虹色の線）は残しても良いが、メニューは隠す */
     
+    /* ★重要：左上のサイドバー開閉ボタン（＞）は絶対に表示させる */
+    [data-testid="stSidebarCollapsedControl"] {
+        display: block !important;
+        visibility: visible !important;
+        z-index: 100000 !important; /* 最前面に持ってくる */
+        color: black !important; /* 色を黒にして見やすく */
+    }
+
     /* 下の「Made with Streamlit」を消す */
     footer {
         visibility: hidden;
+    }
+    
+    /* ヘッダーの背景色を白で固定（透けないように） */
+    header[data-testid="stHeader"] {
+        background-color: white !important;
+        z-index: 9999 !important;
     }
 
     /* --- 2. タブをスクロール時に画面上に固定する（Sticky） --- */
     
     /* タブのリスト部分を固定 */
     .stTabs [data-baseweb="tab-list"] {
-        position: sticky;
-        top: 3.75rem; /* ヘッダーの高さ分（約60px）空ける */
-        z-index: 999; /* 他の要素より手前に表示 */
-        background-color: white; /* 背景を白にして透けないようにする */
-        padding-top: 10px;
-        padding-bottom: 5px;
-        margin-bottom: 10px;
-        border-bottom: 1px solid #ddd; /* 下に薄い線を入れて区切りを見やすく */
-    }
-    
-    /* スマホなどでヘッダーが重ならないように調整 */
-    header {
-        z-index: 1000 !important;
+        position: sticky !important;
+        top: 3.5rem !important; /* ヘッダーの高さ分（約60px）空けて固定 */
+        z-index: 999 !important; /* 他の要素より手前に表示 */
+        background-color: white !important; /* 背景を白にして透けないようにする */
+        padding-top: 1rem;
+        padding-bottom: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* 浮いているような影をつける */
     }
     </style>
 """, unsafe_allow_html=True)
