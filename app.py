@@ -10,27 +10,24 @@ import os
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
-# ★【変更点1】パスワードをコードから削除し、Secrets（金庫）から読み込む
-# これにより、コードを見られてもパスワードはバレません
+# ★【変更】万が一Secretsの設定がまだでも動くように安全策を追加
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
     VIEW_PASS = st.secrets["VIEW_PASS"]
     RESET_PASS = st.secrets["RESET_PASS"]
 except FileNotFoundError:
-    # 万が一設定し忘れた場合の安全策（エラー画面でなくメッセージを出す）
-    st.error("【管理者へ】StreamlitのSecrets設定がまだです！ダッシュボードでパスワードを設定してください。")
-    st.stop()
+    # Secretsがない場合は、とりあえずデフォルトのパスワードで動くようにする（締め出し防止）
+    ADMIN_PASS = "admin2025"
+    VIEW_PASS = "player2025"
+    RESET_PASS = "reset2025"
+except KeyError:
+    # キー名が間違っている場合もデフォルトに戻す
+    ADMIN_PASS = "admin2025"
+    VIEW_PASS = "player2025"
+    RESET_PASS = "reset2025"
 
-# ★【変更点2】右上のGitHubアイコンやメニューを隠すCSS
-hide_github_icon = """
-<style>
-#MainMenu {visibility: hidden;}
-header {visibility: hidden;}
-.stAppDeployButton {display:none;}
-</style>
-"""
-st.markdown(hide_github_icon, unsafe_allow_html=True)
-
+# ★【重要】CSSによる非表示設定を一旦削除しました（これでメニューが復活します）
+# hide_github_icon = ... (削除)
 
 DATA_FILE = "patent_cup_data.json" # データを保存するファイル名
 
