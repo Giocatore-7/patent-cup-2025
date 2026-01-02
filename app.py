@@ -10,24 +10,37 @@ import os
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
-# ★【変更】万が一Secretsの設定がまだでも動くように安全策を追加
+# ★【修正1】コード内からパスワードを完全削除
+# 金庫(Secrets)の設定がないとエラーになり、コードを見てもパスワードはわかりません
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
     VIEW_PASS = st.secrets["VIEW_PASS"]
     RESET_PASS = st.secrets["RESET_PASS"]
-except FileNotFoundError:
-    # Secretsがない場合は、とりあえずデフォルトのパスワードで動くようにする（締め出し防止）
-    ADMIN_PASS = "admin2025"
-    VIEW_PASS = "player2025"
-    RESET_PASS = "reset2025"
-except KeyError:
-    # キー名が間違っている場合もデフォルトに戻す
-    ADMIN_PASS = "admin2025"
-    VIEW_PASS = "player2025"
-    RESET_PASS = "reset2025"
+except (FileNotFoundError, KeyError):
+    st.error("⚠️ エラー: StreamlitのSecrets設定が見つかりません。管理画面でパスワードを設定してください。")
+    st.stop()
 
-# ★【重要】CSSによる非表示設定を一旦削除しました（これでメニューが復活します）
-# hide_github_icon = ... (削除)
+# ★【修正2 & 3】アイコン非表示 ＆ タブの固定表示(Sticky)
+st.markdown("""
+    <style>
+    /* 右上のGitHubアイコンとメニューを隠す */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    .stAppDeployButton {display:none;}
+
+    /* タブを画面上に固定する設定 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+        background-color: white;
+        position: sticky;
+        top: 0px;
+        z-index: 999;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+        box-shadow: 0 4px 2px -2px gray; /* 下に影をつけて浮いているように見せる */
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 DATA_FILE = "patent_cup_data.json" # データを保存するファイル名
 
@@ -218,7 +231,7 @@ def init_session_state():
         
         st.session_state.initialized = True
 
-    # URLパラメータによる自動ログイン
+    # URLパラメータによる自動ログイン（再読み込み対策）
     query_params = st.query_params
     if st.session_state.auth_status is None:
         role = query_params.get("role")
