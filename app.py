@@ -131,7 +131,7 @@ TOURN_SCHED_3COURT = [
 ]
 
 # ==========================================
-# 2. 関数定義 (修正版)
+# 2. 関数定義 (Ver.9 ログイン保持対応版)
 # ==========================================
 
 def load_data_from_json():
@@ -163,7 +163,6 @@ def save_data_to_json():
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def init_session_state():
-    # ★【修正点】初回起動時だけJSONをロードする（そうしないとボタンを押すたびに古いデータで上書きされてしまう！）
     if 'initialized' not in st.session_state:
         saved_data = load_data_from_json()
         
@@ -188,7 +187,6 @@ def init_session_state():
             st.session_state.tourn_duration = saved_data.get('tourn_duration', 10)
             st.session_state.interval_duration = saved_data.get('interval_duration', 15)
         else:
-            # デフォルト値
             if 'app_title' not in st.session_state: st.session_state.app_title = "パテントカップ2025"
             if 'teams_reg' not in st.session_state: st.session_state.teams_reg = DEFAULT_TEAMS_REGULAR.copy()
             if 'teams_mix' not in st.session_state: st.session_state.teams_mix = DEFAULT_TEAMS_MIX.copy()
@@ -201,22 +199,41 @@ def init_session_state():
             if 'tourn_duration' not in st.session_state: st.session_state.tourn_duration = 10
             if 'interval_duration' not in st.session_state: st.session_state.interval_duration = 15
         
-        # 初期化完了フラグ
         st.session_state.initialized = True
 
-def check_password():
+    # ★【改良点】URLのパラメータをチェックして、ログイン状態を復元する
+    query_params = st.query_params
     if st.session_state.auth_status is None:
-        st.markdown("## 🔐 ログイン")
-        password = st.text_input("パスワードを入力", type="password")
-        if st.button("ログイン"):
-            if password == ADMIN_PASS:
-                st.session_state.auth_status = "admin"; st.rerun()
-            elif password == VIEW_PASS:
-                st.session_state.auth_status = "view"; st.rerun()
-            else:
-                st.error("パスワードが違います")
-        return False
-    return True
+        role = query_params.get("role")
+        if role == "player":
+            st.session_state.auth_status = "view"
+        elif role == "admin_secret":
+            st.session_state.auth_status = "admin"
+
+def check_password():
+    # 既に認証済みなら何もしない
+    if st.session_state.auth_status is not None:
+        return True
+
+    # 未認証ならログイン画面を表示
+    st.markdown("## 🔐 ログイン")
+    st.caption("一度ログインすると、次回からは自動で表示されます。")
+    password = st.text_input("パスワードを入力", type="password")
+    
+    if st.button("ログイン"):
+        if password == ADMIN_PASS:
+            st.session_state.auth_status = "admin"
+            # ★【改良点】ログイン成功時にURLにパラメータを埋め込む
+            st.query_params["role"] = "admin_secret"
+            st.rerun()
+        elif password == VIEW_PASS:
+            st.session_state.auth_status = "view"
+            # ★【改良点】ログイン成功時にURLにパラメータを埋め込む
+            st.query_params["role"] = "player"
+            st.rerun()
+        else:
+            st.error("パスワードが違います")
+    return False
 
 def get_team_name(league, code):
     if league == "reg": return st.session_state.teams_reg.get(code, code)
@@ -460,7 +477,11 @@ if check_password():
         if st.sidebar.button("データを最新に更新", icon="🔄"):
             st.rerun()
             
-    if st.sidebar.button("ログアウト"): st.session_state.auth_status = None; st.rerun()
+    # ★【改良点】ログアウト時はURLのパラメータも消す
+    if st.sidebar.button("ログアウト"): 
+        st.session_state.auth_status = None
+        st.query_params.clear() # パラメータを消去してログアウト
+        st.rerun()
 
     # === メイン画面 ===
     st.title(f"⚽ {st.session_state.app_title}")
