@@ -131,7 +131,7 @@ TOURN_SCHED_3COURT = [
 ]
 
 # ==========================================
-# 2. 関数定義 (Ver.9 ログイン保持対応版)
+# 2. 関数定義
 # ==========================================
 
 def load_data_from_json():
@@ -201,7 +201,7 @@ def init_session_state():
         
         st.session_state.initialized = True
 
-    # ★【改良点】URLのパラメータをチェックして、ログイン状態を復元する
+    # ★URLパラメータによる自動ログイン（Ver.9の機能を維持）
     query_params = st.query_params
     if st.session_state.auth_status is None:
         role = query_params.get("role")
@@ -211,11 +211,9 @@ def init_session_state():
             st.session_state.auth_status = "admin"
 
 def check_password():
-    # 既に認証済みなら何もしない
     if st.session_state.auth_status is not None:
         return True
 
-    # 未認証ならログイン画面を表示
     st.markdown("## 🔐 ログイン")
     st.caption("一度ログインすると、次回からは自動で表示されます。")
     password = st.text_input("パスワードを入力", type="password")
@@ -223,12 +221,10 @@ def check_password():
     if st.button("ログイン"):
         if password == ADMIN_PASS:
             st.session_state.auth_status = "admin"
-            # ★【改良点】ログイン成功時にURLにパラメータを埋め込む
             st.query_params["role"] = "admin_secret"
             st.rerun()
         elif password == VIEW_PASS:
             st.session_state.auth_status = "view"
-            # ★【改良点】ログイン成功時にURLにパラメータを埋め込む
             st.query_params["role"] = "player"
             st.rerun()
         else:
@@ -318,7 +314,9 @@ def resolve_tournament_team(league, cup, round_name, ranks_list, match_id_prefix
 def render_match_card(league_type, title, match_id, team_l, team_r, court, is_admin):
     res, _, _ = get_tourn_match_result(match_id)
     header_color = "#FFF0F5" if league_type == "mix" else "#E6F3FF"
-    header_text = f"{title} @ {court}"
+    
+    # ★【修正】コート表記を変更
+    header_text = f"{title} @ {court}コート"
     
     with st.container(border=True):
         st.markdown(f"""<div style="background-color: {header_color}; padding: 8px; border-radius: 5px; margin-bottom: 10px; font-weight: bold;">{header_text}</div>""", unsafe_allow_html=True)
@@ -340,7 +338,7 @@ def render_match_card(league_type, title, match_id, team_l, team_r, court, is_ad
                 b1, b2 = st.columns(2)
                 if b1.button("保存", key=f"sv_{match_id}", type="primary"):
                     st.session_state.tourn_results[match_id] = {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}
-                    save_data_to_json() # 保存！
+                    save_data_to_json() 
                     st.session_state.editing_match_id = None; st.rerun()
                 if b2.button("取消", key=f"cn_{match_id}"): st.session_state.editing_match_id = None; st.rerun()
             else:
@@ -472,15 +470,30 @@ if check_password():
                         st.form_submit_button("保存")
                 if st.button("編集完了（保存）", key="en_te"): 
                     save_data_to_json(); st.session_state.edit_mode_teams=False; st.rerun()
+        
+        # ★【追加】完全初期化機能
+        st.markdown("---")
+        with st.expander("💣 データの完全初期化"):
+            st.error("【注意】全ての試合結果と設定を削除し、初期状態に戻します。元に戻すことはできません。")
+            confirm_pass = st.text_input("実行するには管理者パスワードを入力", type="password", key="reset_pass")
+            if st.button("初期化を実行する", type="primary"):
+                if confirm_pass == ADMIN_PASS:
+                    # ファイル削除
+                    if os.path.exists(DATA_FILE):
+                        os.remove(DATA_FILE)
+                    # セッションステート初期化（強制リロードで反映）
+                    st.session_state.clear()
+                    st.query_params.clear()
+                    st.rerun()
+                else:
+                    st.error("パスワードが違います")
     else:
         st.sidebar.info(f"コート: {st.session_state.court_mode}")
-        if st.sidebar.button("データを最新に更新", icon="🔄"):
-            st.rerun()
+        # ★【削除】閲覧者用の更新ボタンは削除しました
             
-    # ★【改良点】ログアウト時はURLのパラメータも消す
     if st.sidebar.button("ログアウト"): 
         st.session_state.auth_status = None
-        st.query_params.clear() # パラメータを消去してログアウト
+        st.query_params.clear() 
         st.rerun()
 
     # === メイン画面 ===
@@ -492,13 +505,24 @@ if check_password():
 
     # Tab 1: 順位表
     with tab1:
+        # ★【修正】カラム設定を追加（チーム名の幅を固定）
+        common_cfg = {"チーム名": st.column_config.TextColumn("チーム名", width="medium")}
+        
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("🟦 ガチリーグ")
-            st.dataframe(df_reg.style.background_gradient(subset=['勝点'], cmap='Blues').format(precision=0), hide_index=True)
+            st.dataframe(
+                df_reg.style.background_gradient(subset=['勝点'], cmap='Blues').format(precision=0), 
+                hide_index=True, 
+                column_config=common_cfg
+            )
         with c2:
             st.subheader("🟧 MIXリーグ")
-            st.dataframe(df_mix.style.background_gradient(subset=['勝点'], cmap='Oranges').format(precision=0), hide_index=True)
+            st.dataframe(
+                df_mix.style.background_gradient(subset=['勝点'], cmap='Oranges').format(precision=0), 
+                hide_index=True,
+                column_config=common_cfg
+            )
 
     # Tab 2: リーグ戦
     with tab2:
@@ -530,7 +554,8 @@ if check_password():
                 
                 with cols[idx]:
                     header_color = "#FFF0F5" if l_type == "mix" else "#E6F3FF"
-                    header_text = f"{court} (MIX)" if l_type == "mix" else f"{court} (ガチ)"
+                    # ★【修正】コート名に「コート」を追加
+                    header_text = f"{court}コート (MIX)" if l_type == "mix" else f"{court}コート (ガチ)"
                     
                     with st.container(border=True):
                         st.markdown(f"""<div style="background-color: {header_color}; padding: 8px; border-radius: 5px; margin-bottom: 10px; font-weight: bold;">{header_text}</div>""", unsafe_allow_html=True)
