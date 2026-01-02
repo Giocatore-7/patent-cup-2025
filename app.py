@@ -131,14 +131,17 @@ TOURN_SCHED_3COURT = [
 ]
 
 # ==========================================
-# 2. 関数定義 (データ同期機能付き)
+# 2. 関数定義 (修正版)
 # ==========================================
 
 def load_data_from_json():
     """JSONファイルからデータを読み込む"""
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return None
     return None
 
 def save_data_to_json():
@@ -160,43 +163,46 @@ def save_data_to_json():
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def init_session_state():
-    # 毎回JSONから最新データを読み込む
-    saved_data = load_data_from_json()
-    
-    # 認証状態だけは個人のセッションで管理
-    if 'auth_status' not in st.session_state: st.session_state.auth_status = None
-    if 'edit_mode_title' not in st.session_state: st.session_state.edit_mode_title = False
-    if 'edit_mode_court' not in st.session_state: st.session_state.edit_mode_court = False
-    if 'edit_mode_settings' not in st.session_state: st.session_state.edit_mode_settings = False
-    if 'edit_mode_teams' not in st.session_state: st.session_state.edit_mode_teams = False
-    if 'editing_match_id' not in st.session_state: st.session_state.editing_match_id = None
+    # ★【修正点】初回起動時だけJSONをロードする（そうしないとボタンを押すたびに古いデータで上書きされてしまう！）
+    if 'initialized' not in st.session_state:
+        saved_data = load_data_from_json()
+        
+        # 変数の初期化
+        st.session_state.auth_status = None
+        st.session_state.edit_mode_title = False
+        st.session_state.edit_mode_court = False
+        st.session_state.edit_mode_settings = False
+        st.session_state.edit_mode_teams = False
+        st.session_state.editing_match_id = None
 
-    if saved_data:
-        # JSONがある場合は反映
-        st.session_state.app_title = saved_data.get('app_title', "パテントカップ2025")
-        st.session_state.teams_reg = saved_data.get('teams_reg', DEFAULT_TEAMS_REGULAR.copy())
-        st.session_state.teams_mix = saved_data.get('teams_mix', DEFAULT_TEAMS_MIX.copy())
-        st.session_state.results = saved_data.get('results', {})
-        st.session_state.tourn_results = saved_data.get('tourn_results', {})
-        st.session_state.court_mode = saved_data.get('court_mode', "4面")
-        st.session_state.start_time_hour = saved_data.get('start_time_hour', 13)
-        st.session_state.start_time_minute = saved_data.get('start_time_minute', 15)
-        st.session_state.league_duration = saved_data.get('league_duration', 7)
-        st.session_state.tourn_duration = saved_data.get('tourn_duration', 10)
-        st.session_state.interval_duration = saved_data.get('interval_duration', 15)
-    else:
-        # 初回起動時（JSONがない場合）のデフォルト
-        if 'app_title' not in st.session_state: st.session_state.app_title = "パテントカップ2025"
-        if 'teams_reg' not in st.session_state: st.session_state.teams_reg = DEFAULT_TEAMS_REGULAR.copy()
-        if 'teams_mix' not in st.session_state: st.session_state.teams_mix = DEFAULT_TEAMS_MIX.copy()
-        if 'results' not in st.session_state: st.session_state.results = {} 
-        if 'tourn_results' not in st.session_state: st.session_state.tourn_results = {}
-        if 'court_mode' not in st.session_state: st.session_state.court_mode = "4面"
-        if 'start_time_hour' not in st.session_state: st.session_state.start_time_hour = 13
-        if 'start_time_minute' not in st.session_state: st.session_state.start_time_minute = 15
-        if 'league_duration' not in st.session_state: st.session_state.league_duration = 7
-        if 'tourn_duration' not in st.session_state: st.session_state.tourn_duration = 10
-        if 'interval_duration' not in st.session_state: st.session_state.interval_duration = 15
+        if saved_data:
+            st.session_state.app_title = saved_data.get('app_title', "パテントカップ2025")
+            st.session_state.teams_reg = saved_data.get('teams_reg', DEFAULT_TEAMS_REGULAR.copy())
+            st.session_state.teams_mix = saved_data.get('teams_mix', DEFAULT_TEAMS_MIX.copy())
+            st.session_state.results = saved_data.get('results', {})
+            st.session_state.tourn_results = saved_data.get('tourn_results', {})
+            st.session_state.court_mode = saved_data.get('court_mode', "4面")
+            st.session_state.start_time_hour = saved_data.get('start_time_hour', 13)
+            st.session_state.start_time_minute = saved_data.get('start_time_minute', 15)
+            st.session_state.league_duration = saved_data.get('league_duration', 7)
+            st.session_state.tourn_duration = saved_data.get('tourn_duration', 10)
+            st.session_state.interval_duration = saved_data.get('interval_duration', 15)
+        else:
+            # デフォルト値
+            if 'app_title' not in st.session_state: st.session_state.app_title = "パテントカップ2025"
+            if 'teams_reg' not in st.session_state: st.session_state.teams_reg = DEFAULT_TEAMS_REGULAR.copy()
+            if 'teams_mix' not in st.session_state: st.session_state.teams_mix = DEFAULT_TEAMS_MIX.copy()
+            if 'results' not in st.session_state: st.session_state.results = {} 
+            if 'tourn_results' not in st.session_state: st.session_state.tourn_results = {}
+            if 'court_mode' not in st.session_state: st.session_state.court_mode = "4面"
+            if 'start_time_hour' not in st.session_state: st.session_state.start_time_hour = 13
+            if 'start_time_minute' not in st.session_state: st.session_state.start_time_minute = 15
+            if 'league_duration' not in st.session_state: st.session_state.league_duration = 7
+            if 'tourn_duration' not in st.session_state: st.session_state.tourn_duration = 10
+            if 'interval_duration' not in st.session_state: st.session_state.interval_duration = 15
+        
+        # 初期化完了フラグ
+        st.session_state.initialized = True
 
 def check_password():
     if st.session_state.auth_status is None:
@@ -447,8 +453,6 @@ if check_password():
                     with st.form("mt"):
                         for c in "ABCDEFGHIJKL": st.session_state.teams_mix[c] = st.text_input(f"{c}", st.session_state.teams_mix[c])
                         st.form_submit_button("保存")
-                # チーム名は変更時に即座に保存するようにform外のボタンで処理またはform内での処理を工夫
-                # 今回は簡単のため、完了ボタンで保存
                 if st.button("編集完了（保存）", key="en_te"): 
                     save_data_to_json(); st.session_state.edit_mode_teams=False; st.rerun()
     else:
