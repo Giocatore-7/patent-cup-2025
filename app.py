@@ -8,10 +8,10 @@ import os
 # ==========================================
 # 1. 設定・データ定義
 # ==========================================
-# ★【修正】サイドバーを初期状態で開く設定(initial_sidebar_state="expanded")を追加
+# サイドバーを初期状態で開く設定
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide", initial_sidebar_state="expanded")
 
-# パスワード管理（Secretsからのみ読み込み）
+# パスワード管理（Secrets必須）
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
     VIEW_PASS = st.secrets["VIEW_PASS"]
@@ -21,37 +21,44 @@ except (FileNotFoundError, KeyError):
     st.info("管理者の方へ: Streamlit Community Cloudの「Settings > Secrets」にてパスワードを設定してください。")
     st.stop()
 
-# ★【修正】CSS設定（アイコン隠し＆タブ固定の強化版）
+# ★【修正】CSS設定（サイドバーボタンを守りつつ、他を隠す ＆ タブ固定）
 st.markdown("""
     <style>
-    /* 1. 右上のツールバー（GitHubアイコン等）だけを見えなくする */
-    /* display:none ではなく visibility:hidden にすることで、場所は確保しつつ透明にします（レイアウト崩れ防止） */
-    [data-testid="stToolbar"] {
-        visibility: hidden !important;
-    }
+    /* --- 1. 不要なアイコンだけをピンポイントで消す --- */
     
-    /* Deployボタンやメニュー、フッターを消す */
-    .stAppDeployButton, footer {
+    /* 右上の「Deploy」ボタンを消す */
+    .stAppDeployButton {
         display: none !important;
     }
-    #MainMenu {
-        visibility: hidden !important;
+    /* 右上の「3点リーダー（メニュー）」などのボタン群を消す */
+    /* stToolbar全体を消すとサイドバーボタンに影響する恐れがあるため、中身のボタンを消します */
+    [data-testid="stToolbar"] button {
+        display: none !important;
+    }
+    /* ヘッダーの装飾（虹色の線）は残しても良いが、メニューは隠す */
+    
+    /* 下の「Made with Streamlit」を消す */
+    footer {
+        visibility: hidden;
     }
 
-    /* 2. タブをスクロール追従（Sticky）させる強力な設定 */
-    /* Streamlitのバージョンによってクラス名が変わっても効くように複数の指定を入れています */
-    div[data-baseweb="tab-list"], .stTabs > div:first-child {
-        position: sticky !important;
-        top: 3rem !important; /* ヘッダーの高さ分あける */
-        z-index: 9999 !important;
-        background-color: white !important; /* 背景を白くして透けないようにする */
-        padding-top: 1rem;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); /* 浮いている感じの影 */
+    /* --- 2. タブをスクロール時に画面上に固定する（Sticky） --- */
+    
+    /* タブのリスト部分を固定 */
+    .stTabs [data-baseweb="tab-list"] {
+        position: sticky;
+        top: 3.75rem; /* ヘッダーの高さ分（約60px）空ける */
+        z-index: 999; /* 他の要素より手前に表示 */
+        background-color: white; /* 背景を白にして透けないようにする */
+        padding-top: 10px;
+        padding-bottom: 5px;
+        margin-bottom: 10px;
+        border-bottom: 1px solid #ddd; /* 下に薄い線を入れて区切りを見やすく */
     }
     
-    /* スマホで見た時のヘッダー調整 */
-    header[data-testid="stHeader"] {
-        z-index: 10000 !important;
+    /* スマホなどでヘッダーが重ならないように調整 */
+    header {
+        z-index: 1000 !important;
     }
     </style>
 """, unsafe_allow_html=True)
