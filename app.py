@@ -10,9 +10,27 @@ import os
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
-# パスワード設定
-ADMIN_PASS, VIEW_PASS = "admin2025", "player2025"
-RESET_PASS = "reset2025"  # 初期化専用パスワード
+# ★【変更点1】パスワードをコードから削除し、Secrets（金庫）から読み込む
+# これにより、コードを見られてもパスワードはバレません
+try:
+    ADMIN_PASS = st.secrets["ADMIN_PASS"]
+    VIEW_PASS = st.secrets["VIEW_PASS"]
+    RESET_PASS = st.secrets["RESET_PASS"]
+except FileNotFoundError:
+    # 万が一設定し忘れた場合の安全策（エラー画面でなくメッセージを出す）
+    st.error("【管理者へ】StreamlitのSecrets設定がまだです！ダッシュボードでパスワードを設定してください。")
+    st.stop()
+
+# ★【変更点2】右上のGitHubアイコンやメニューを隠すCSS
+hide_github_icon = """
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+.stAppDeployButton {display:none;}
+</style>
+"""
+st.markdown(hide_github_icon, unsafe_allow_html=True)
+
 
 DATA_FILE = "patent_cup_data.json" # データを保存するファイル名
 
@@ -473,7 +491,7 @@ if check_password():
                 if st.button("編集完了（保存）", key="en_te"): 
                     save_data_to_json(); st.session_state.edit_mode_teams=False; st.rerun()
         
-        # ★【修正】爆弾アイコン削除 & リセット専用パスワード使用
+        # ★【追加】完全初期化機能（爆弾削除）
         st.markdown("---")
         with st.expander("データの完全初期化"):
             st.error("【注意】全ての試合結果と設定を削除し、初期状態に戻します。元に戻すことはできません。")
