@@ -10,8 +10,10 @@ import os
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
-# パスワード
+# パスワード設定
 ADMIN_PASS, VIEW_PASS = "admin2025", "player2025"
+RESET_PASS = "reset2025"  # 初期化専用パスワード
+
 DATA_FILE = "patent_cup_data.json" # データを保存するファイル名
 
 # チーム名初期値
@@ -201,7 +203,7 @@ def init_session_state():
         
         st.session_state.initialized = True
 
-    # ★URLパラメータによる自動ログイン（Ver.9の機能を維持）
+    # URLパラメータによる自動ログイン
     query_params = st.query_params
     if st.session_state.auth_status is None:
         role = query_params.get("role")
@@ -315,7 +317,7 @@ def render_match_card(league_type, title, match_id, team_l, team_r, court, is_ad
     res, _, _ = get_tourn_match_result(match_id)
     header_color = "#FFF0F5" if league_type == "mix" else "#E6F3FF"
     
-    # ★【修正】コート表記を変更
+    # コート名に「コート」を追加
     header_text = f"{title} @ {court}コート"
     
     with st.container(border=True):
@@ -471,17 +473,16 @@ if check_password():
                 if st.button("編集完了（保存）", key="en_te"): 
                     save_data_to_json(); st.session_state.edit_mode_teams=False; st.rerun()
         
-        # ★【追加】完全初期化機能
+        # ★【修正】爆弾アイコン削除 & リセット専用パスワード使用
         st.markdown("---")
-        with st.expander("💣 データの完全初期化"):
+        with st.expander("データの完全初期化"):
             st.error("【注意】全ての試合結果と設定を削除し、初期状態に戻します。元に戻すことはできません。")
-            confirm_pass = st.text_input("実行するには管理者パスワードを入力", type="password", key="reset_pass")
+            confirm_pass = st.text_input("実行するにはリセット用パスワードを入力", type="password", key="reset_pass")
             if st.button("初期化を実行する", type="primary"):
-                if confirm_pass == ADMIN_PASS:
-                    # ファイル削除
+                # ここで RESET_PASS と一致するかチェック
+                if confirm_pass == RESET_PASS:
                     if os.path.exists(DATA_FILE):
                         os.remove(DATA_FILE)
-                    # セッションステート初期化（強制リロードで反映）
                     st.session_state.clear()
                     st.query_params.clear()
                     st.rerun()
@@ -489,7 +490,6 @@ if check_password():
                     st.error("パスワードが違います")
     else:
         st.sidebar.info(f"コート: {st.session_state.court_mode}")
-        # ★【削除】閲覧者用の更新ボタンは削除しました
             
     if st.sidebar.button("ログアウト"): 
         st.session_state.auth_status = None
@@ -505,7 +505,7 @@ if check_password():
 
     # Tab 1: 順位表
     with tab1:
-        # ★【修正】カラム設定を追加（チーム名の幅を固定）
+        # カラム設定を追加（チーム名の幅を固定）
         common_cfg = {"チーム名": st.column_config.TextColumn("チーム名", width="medium")}
         
         c1, c2 = st.columns(2)
@@ -554,7 +554,7 @@ if check_password():
                 
                 with cols[idx]:
                     header_color = "#FFF0F5" if l_type == "mix" else "#E6F3FF"
-                    # ★【修正】コート名に「コート」を追加
+                    # コート名に「コート」を追加
                     header_text = f"{court}コート (MIX)" if l_type == "mix" else f"{court}コート (ガチ)"
                     
                     with st.container(border=True):
