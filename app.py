@@ -11,7 +11,7 @@ import os
 # サイドバーを初期状態で開く設定
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide", initial_sidebar_state="expanded")
 
-# パスワード管理（Secrets必須）
+# パスワード管理
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
     VIEW_PASS = st.secrets["VIEW_PASS"]
@@ -24,48 +24,57 @@ except (FileNotFoundError, KeyError):
 # ★【修正】CSS設定（サイドバーボタン保護 ＆ タブ吸着の強化）
 st.markdown("""
     <style>
-    /* --- 1. 不要なものを消しつつ、サイドバーボタンを守る --- */
+    /* --- 1. ヘッダーとサイドバーボタンの設定 --- */
     
-    /* 右上のツールバー（3点リーダーなど）を消す */
-    [data-testid="stToolbar"] {
-        display: none !important;
+    /* ヘッダー全体は「表示」し、背景を白にする（サイドバーボタンのために必要） */
+    header[data-testid="stHeader"] {
+        visibility: visible !important;
+        background-color: white !important;
+        z-index: 1000 !important; /* 最前面に固定 */
     }
-    
+
+    /* 右上のツールバー（3点リーダーなど）だけを「透明」にする */
+    /* display: none だとレイアウトが崩れることがあるので visibility: hidden 推奨 */
+    [data-testid="stToolbar"] {
+        visibility: hidden !important;
+        pointer-events: none !important; /* 透明なボタンを押せないようにする */
+    }
+
     /* 右上のDeployボタンを消す */
     .stAppDeployButton {
         display: none !important;
     }
     
-    /* ★重要：左上のサイドバー開閉ボタン（＞）は絶対に表示させる */
+    /* 左上のサイドバー開閉ボタン（＞）は「見える」かつ「押せる」ようにする */
     [data-testid="stSidebarCollapsedControl"] {
-        display: block !important;
         visibility: visible !important;
-        z-index: 100000 !important; /* 最前面に持ってくる */
-        color: black !important; /* 色を黒にして見やすく */
+        display: block !important;
+        pointer-events: auto !important;
+        color: black !important;
     }
 
     /* 下の「Made with Streamlit」を消す */
     footer {
         visibility: hidden;
     }
-    
-    /* ヘッダーの背景色を白で固定（透けないように） */
-    header[data-testid="stHeader"] {
-        background-color: white !important;
-        z-index: 9999 !important;
-    }
 
     /* --- 2. タブをスクロール時に画面上に固定する（Sticky） --- */
+    
+    /* タブのコンテナに対する修正（スクロール追従を妨げる設定を解除） */
+    .stApp {
+        overflow: visible !important;
+    }
     
     /* タブのリスト部分を固定 */
     .stTabs [data-baseweb="tab-list"] {
         position: sticky !important;
-        top: 3.5rem !important; /* ヘッダーの高さ分（約60px）空けて固定 */
-        z-index: 999 !important; /* 他の要素より手前に表示 */
-        background-color: white !important; /* 背景を白にして透けないようにする */
+        top: 3.75rem !important; /* ヘッダーの高さ(約60px)分空けて固定 */
+        z-index: 999 !important; /* ヘッダーよりは下、コンテンツよりは上 */
+        background-color: white !important; /* 透けないように白背景 */
         padding-top: 1rem;
         padding-bottom: 0.5rem;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1); /* 浮いているような影をつける */
+        border-bottom: 2px solid #f0f0f0; /* 境界線 */
+        margin-top: -1rem; /* 余計な隙間を詰める */
     }
     </style>
 """, unsafe_allow_html=True)
