@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import graphviz
 import json
 import os
+# --- 追加ライブラリ ---
+import gspread
+from google.oauth2.service_account import Credentials
 
 # ==========================================
 # 1. 設定・データ定義
