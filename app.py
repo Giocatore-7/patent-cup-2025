@@ -182,10 +182,16 @@ def get_google_sheet():
         st.error(f"スプレッドシート接続エラー: {e}")
         return None
 
+# 修正前
+# def load_data_from_json():
+
+# 修正後（@st.cache_data をつける）
+@st.cache_data(ttl=30)  # ← 追加！このデータは30秒間キャッシュされます
 def load_data_from_json():
     """Googleスプレッドシート(A1セル)からデータを読み込む"""
     try:
         sheet = get_google_sheet()
+        # ... (中身はそのまま) ...
         if sheet:
             # A1セルの値を取得
             data_str = sheet.cell(1, 1).value
