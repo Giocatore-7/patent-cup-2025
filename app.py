@@ -231,6 +231,50 @@ def save_data_to_json():
     except Exception as e:
         st.error(f"保存エラー: {e}")
 
+# ==========================================
+# ★追加：競合を防ぐための「単一試合更新」関数
+# ==========================================
+def save_specific_match(match_key, new_result_dict, is_tournament=False):
+    """
+    クラウド上の最新データを取得し、特定の1試合の結果だけを書き換えて保存する。
+    これにより、他人の入力を消してしまう事故を防ぐ。
+    """
+    try:
+        sheet = get_google_sheet()
+        if sheet:
+            # 1. クラウドにある「正真正銘の最新データ」を取りに行く
+            current_val = sheet.cell(1, 1).value
+            if not current_val:
+                st.error("データの読み込みに失敗しました")
+                return
+            
+            # 2. JSONを復元
+            data = json.loads(current_val)
+            
+            # 3. 指定された試合だけを書き換える（他は触らない！）
+            if is_tournament:
+                data['tourn_results'][match_key] = new_result_dict
+            else:
+                data['results'][match_key] = new_result_dict
+            
+            # 4. 書き戻す
+            json_str = json.dumps(data, ensure_ascii=False)
+            sheet.update_cell(1, 1, json_str)
+            
+            # 5. 自分の手元のデータも最新に合わせる
+            if is_tournament:
+                st.session_state.tourn_results = data['tourn_results']
+            else:
+                st.session_state.results = data['results']
+            
+            # 6. キャッシュをクリア
+            load_data_from_json.clear()
+            
+            st.toast(f"✅ 試合 {match_key} の結果を保存しました")
+            
+    except Exception as e:
+        st.error(f"保存エラー（再試行してください）: {e}")
+
 def init_session_state():
     if 'initialized' not in st.session_state:
         saved_data = load_data_from_json()
