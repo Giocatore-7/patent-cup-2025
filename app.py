@@ -696,9 +696,15 @@ if check_password():
                                 v2 = c2.number_input("右", value=res['s2'] or 0, key=f"{match_key}_2", label_visibility="collapsed")
                                 b1, b2 = st.columns(2)
                                 if b1.button("確定", key=f"sv_{match_key}", type="primary"):
-                                    st.session_state.results[match_key] = {'s1': v1, 's2': v2}
-                                    save_data_to_json() # 保存！
-                                    st.session_state.editing_match_id = None; st.rerun()
+                                    # --- 修正前 ---
+# st.session_state.results[match_key] = {'s1': v1, 's2': v2}
+# save_data_to_json() 
+# st.session_state.editing_match_id = None; st.rerun()
+
+# --- 修正後 ---
+save_specific_match(match_key, {'s1': v1, 's2': v2}, is_tournament=False)
+st.session_state.editing_match_id = None
+st.rerun()
                                 if b2.button("中止", key=f"cn_{match_key}"): st.session_state.editing_match_id = None; st.rerun()
                             else:
                                 if res['s1'] is not None:
