@@ -630,15 +630,48 @@ if check_password():
             # 5. データの完全初期化
             st.markdown("---")
             st.error("【危険】データの完全初期化")
-            st.caption("全ての試合結果と設定を削除し、初期状態に戻します。元に戻すことはできません。")
+            st.caption("全ての試合結果、チーム名、設定を初期状態に戻します。Googleスプレッドシートの記録も全て消去されます。")
             confirm_pass = st.text_input("実行するにはリセット用パスワードを入力", type="password", key="reset_pass")
+            
             if st.button("初期化を実行する", type="primary"):
                 if confirm_pass == RESET_PASS:
-                    if os.path.exists(DATA_FILE):
-                        os.remove(DATA_FILE)
-                    st.session_state.clear()
-                    st.query_params.clear()
-                    st.rerun()
+                    try:
+                        sheet = get_google_sheet()
+                        if sheet:
+                            # 1. デフォルトのデータを作成
+                            default_data = {
+                                'app_title': "パテントカップ2025",
+                                'teams_reg': DEFAULT_TEAMS_REGULAR.copy(),
+                                'teams_mix': DEFAULT_TEAMS_MIX.copy(),
+                                'results': {},
+                                'tourn_results': {},
+                                'court_mode': "4面",
+                                'start_time_hour': 13,
+                                'start_time_minute': 15,
+                                'league_duration': 7,
+                                'tourn_duration': 10,
+                                'interval_duration': 15
+                            }
+                            
+                            # 2. シートを真っ白にする（これで追記されたログも全部消えます）
+                            sheet.clear()
+                            
+                            # 3. A1セルにデフォルトデータを書き込む
+                            sheet.update_cell(1, 1, json.dumps(default_data, ensure_ascii=False))
+                            
+                            # 4. キャッシュをクリア
+                            load_data_from_json.clear()
+                            
+                            # 5. セッションステート（手元の画面）もリセット
+                            st.session_state.clear()
+                            st.query_params.clear()
+                            
+                            st.toast("✅ 全データを初期化しました")
+                            time.sleep(2) # メッセージを読む時間を確保
+                            st.rerun()
+                            
+                    except Exception as e:
+                        st.error(f"初期化エラー: {e}")
                 else:
                     st.error("パスワードが違います")
 
