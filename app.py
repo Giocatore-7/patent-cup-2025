@@ -221,10 +221,12 @@ def save_data_to_json():
     try:
         sheet = get_google_sheet()
         if sheet:
-            # 辞書をJSON文字列に変換してA1セルに書き込む
             json_str = json.dumps(data, ensure_ascii=False)
             sheet.update_cell(1, 1, json_str)
-            # 成功メッセージ（デバッグ用：邪魔なら消してください）
+            
+            # ★ここに追加！ 保存したらキャッシュを削除して、次回は必ず読み込み直すようにする
+            load_data_from_json.clear()
+            
             st.toast("✅ データをクラウドに保存しました")
     except Exception as e:
         st.error(f"保存エラー: {e}")
