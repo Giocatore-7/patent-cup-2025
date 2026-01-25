@@ -271,16 +271,13 @@ def save_data_to_json():
 
 def save_specific_match(match_key, new_result_dict, is_tournament=False):
     """
-    【追記型】
-    既存のセルを書き換えるのではなく、
-    「変更内容」をスプレッドシートの末尾に「行追加」する。
-    これなら同時アクセスでも絶対に衝突しない。
+    【追記型・即時反映版】
+    変更内容をログとして追記し、かつ手元の画面表示も即座に更新する。
     """
     try:
         sheet = get_google_sheet()
         if sheet:
-            # 保存するログデータを作成
-            # k: キー, v: 結果, t: トーナメントかどうか
+            # 1. 保存するログデータを作成
             log_data = {
                 'k': match_key,
                 'v': new_result_dict,
@@ -288,11 +285,18 @@ def save_specific_match(match_key, new_result_dict, is_tournament=False):
             }
             json_str = json.dumps(log_data, ensure_ascii=False)
             
-            # ★ここがポイント：append_row は原子性がある（競合しない）
+            # 2. Googleスプレッドシートに行追加（Googleが順番制御してくれるので競合しない）
             sheet.append_row([json_str])
             
-            # キャッシュをクリアして再読み込みさせる
+            # ★ここを追加！ 手元の画面（セッションステート）もすぐに更新して、リロード不要にする
+            if is_tournament:
+                st.session_state.tourn_results[match_key] = new_result_dict
+            else:
+                st.session_state.results[match_key] = new_result_dict
+            
+            # 3. キャッシュをクリア（次に他の人が読み込むときのために）
             load_data_from_json.clear()
+            
             st.toast(f"✅ 試合結果を記録しました")
             
     except Exception as e:
