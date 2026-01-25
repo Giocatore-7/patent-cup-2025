@@ -448,9 +448,15 @@ def render_match_card(league_type, title, match_id, team_l, team_r, court, is_ad
                     pk_v2 = cp2.number_input("P右", value=res['pk2'] or 0, key=f"{match_id}_pk2")
                 b1, b2 = st.columns(2)
                 if b1.button("保存", key=f"sv_{match_id}", type="primary"):
-                    st.session_state.tourn_results[match_id] = {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}
-                    save_data_to_json() 
-                    st.session_state.editing_match_id = None; st.rerun()
+                    # --- 修正前 ---
+# st.session_state.tourn_results[match_id] = {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}
+# save_data_to_json() 
+# st.session_state.editing_match_id = None; st.rerun()
+
+# --- 修正後 ---
+save_specific_match(match_id, {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}, is_tournament=True)
+st.session_state.editing_match_id = None
+st.rerun()
                 if b2.button("取消", key=f"cn_{match_id}"): st.session_state.editing_match_id = None; st.rerun()
             else:
                 if res['s1'] is not None:
