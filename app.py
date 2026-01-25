@@ -163,21 +163,41 @@ TOURN_SCHED_3COURT = [
 ]
 
 # ==========================================
-# 2. 関数定義
+# 2. 関数定義 (Google Sheets 対応版)
 # ==========================================
 
+def get_google_sheet():
+    """Googleスプレッドシートに接続する関数"""
+    try:
+        # SecretsからJSONキーの文字列を取得して辞書に変換
+        key_dict = json.loads(st.secrets["GCP_JSON_KEY"])
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(key_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        
+        # シートを開く
+        sheet_name = st.secrets["SPREADSHEET_NAME"]
+        return client.open(sheet_name).sheet1
+    except Exception as e:
+        st.error(f"スプレッドシート接続エラー: {e}")
+        return None
+
 def load_data_from_json():
-    """JSONファイルからデータを読み込む"""
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return None
+    """Googleスプレッドシート(A1セル)からデータを読み込む"""
+    try:
+        sheet = get_google_sheet()
+        if sheet:
+            # A1セルの値を取得
+            data_str = sheet.cell(1, 1).value
+            if data_str:
+                return json.loads(data_str)
+    except Exception as e:
+        # まだデータがない場合などはここに来るので無視してOK
+        pass
     return None
 
 def save_data_to_json():
-    """現在のステートをJSONファイルに保存する"""
+    """現在のステートをGoogleスプレッドシート(A1セル)に保存する"""
     data = {
         'app_title': st.session_state.app_title,
         'teams_reg': st.session_state.teams_reg,
@@ -191,8 +211,17 @@ def save_data_to_json():
         'tourn_duration': st.session_state.tourn_duration,
         'interval_duration': st.session_state.interval_duration
     }
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    try:
+        sheet = get_google_sheet()
+        if sheet:
+            # 辞書をJSON文字列に変換してA1セルに書き込む
+            json_str = json.dumps(data, ensure_ascii=False)
+            sheet.update_cell(1, 1, json_str)
+            # 成功メッセージ（デバッグ用：邪魔なら消してください）
+            st.toast("✅ データをクラウドに保存しました")
+    except Exception as e:
+        st.error(f"保存エラー: {e}")
 
 def init_session_state():
     if 'initialized' not in st.session_state:
