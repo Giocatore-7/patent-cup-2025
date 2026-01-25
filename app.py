@@ -187,25 +187,59 @@ def get_google_sheet():
 # 修正前
 # def load_data_from_json():
 
-# 修正後（@st.cache_data をつける）
-@st.cache_data(ttl=30)  # ← 追加！このデータは30秒間キャッシュされます
+@st.cache_data(ttl=15) # キャッシュ時間を少し短くして反応を良くします
 def load_data_from_json():
-    """Googleスプレッドシート(A1セル)からデータを読み込む"""
+    """
+    【追記型】
+    A1セルの「基本データ」を読み込み、
+    2行目以降の「変更ログ」を全て適用して、最新状態を復元する。
+    """
     try:
         sheet = get_google_sheet()
-        # ... (中身はそのまま) ...
-        if sheet:
-            # A1セルの値を取得
-            data_str = sheet.cell(1, 1).value
-            if data_str:
-                return json.loads(data_str)
+        if not sheet: return None
+
+        # シートの全データを一括取得（これが一番速い）
+        all_values = sheet.get_all_values()
+        
+        if not all_values: return None
+        
+        # 1行目（A1）は基本データ
+        try:
+            current_data = json.loads(all_values[0][0])
+        except:
+            return None # データが壊れている場合
+
+        # 2行目以降は「変更ログ」なので、順番に適用していく
+        # ログの形式: [json_string] (中身は {'k': match_key, 'v': result, 't': is_tournament})
+        if len(all_values) > 1:
+            for row in all_values[1:]:
+                if row and row[0]:
+                    try:
+                        log = json.loads(row[0])
+                        # ログの内容をデータに上書き適用
+                        m_key = log.get('k')
+                        res = log.get('v')
+                        is_tourn = log.get('t')
+                        
+                        if is_tourn:
+                            current_data['tourn_results'][m_key] = res
+                        else:
+                            current_data['results'][m_key] = res
+                    except:
+                        continue # 壊れたログは無視
+
+        return current_data
+            
     except Exception as e:
-        # まだデータがない場合などはここに来るので無視してOK
-        pass
-    return None
+        return None
 
 def save_data_to_json():
-    """現在のステートをGoogleスプレッドシート(A1セル)に保存する"""
+    """
+    【管理者用】
+    現在の最新状態（ログ適用済み）を正として、A1セルを更新し、
+    2行目以降のログを削除してスッキリさせる（スナップショット作成）。
+    """
+    # まず、現在のセッションステートから保存用データを作る
     data = {
         'app_title': st.session_state.app_title,
         'teams_reg': st.session_state.teams_reg,
@@ -224,86 +258,45 @@ def save_data_to_json():
         sheet = get_google_sheet()
         if sheet:
             json_str = json.dumps(data, ensure_ascii=False)
+            
+            # シートを一旦クリアして、A1だけ書き直す
+            sheet.clear()
             sheet.update_cell(1, 1, json_str)
             
-            # ★ここに追加！ 保存したらキャッシュを削除して、次回は必ず読み込み直すようにする
+            # キャッシュクリア
             load_data_from_json.clear()
-            
-            st.toast("✅ データをクラウドに保存しました")
+            st.toast("✅ 設定を保存し、データを最適化しました")
     except Exception as e:
         st.error(f"保存エラー: {e}")
 
-# ==========================================
-# ★修正：競合を防ぐための「リトライ機能付き」保存関数
-# ==========================================
 def save_specific_match(match_key, new_result_dict, is_tournament=False):
     """
-    クラウド上の最新データを取得し、特定の1試合の結果だけを書き換えて保存する。
-    【強化点】
-    1. 保存直前に「データが他人に書き換えられていないか」をチェックする
-    2. 書き換えられていたら、自動で読み込み直してリトライする（最大5回）
-    3. ランダムな待機時間を入れて、アクセスの衝突を避ける
+    【追記型】
+    既存のセルを書き換えるのではなく、
+    「変更内容」をスプレッドシートの末尾に「行追加」する。
+    これなら同時アクセスでも絶対に衝突しない。
     """
-    MAX_RETRIES = 5  # 最大5回までやり直す
-    
-    for attempt in range(MAX_RETRIES):
-        try:
-            # 1. 衝突回避のため、わざと少しだけ待つ（0.1秒〜1.0秒のランダム）
-            time.sleep(random.uniform(0.1, 1.0))
-
-            sheet = get_google_sheet()
-            if not sheet:
-                st.error("スプレッドシートが見つかりません")
-                return
-
-            # 2. 現在のデータを取得（比較用）
-            current_val_before = sheet.cell(1, 1).value
-            if not current_val_before:
-                # データが空の場合（復旧直後など）はそのまま書き込むチャンス
-                data = init_empty_data() # ※念の為の空データ作成機能（下で定義してなくてもエラーにならないよう配慮）
-            else:
-                data = json.loads(current_val_before)
-
-            # 3. 指定された試合だけを書き換える
-            if is_tournament:
-                data['tourn_results'][match_key] = new_result_dict
-            else:
-                data['results'][match_key] = new_result_dict
+    try:
+        sheet = get_google_sheet()
+        if sheet:
+            # 保存するログデータを作成
+            # k: キー, v: 結果, t: トーナメントかどうか
+            log_data = {
+                'k': match_key,
+                'v': new_result_dict,
+                't': is_tournament
+            }
+            json_str = json.dumps(log_data, ensure_ascii=False)
             
-            # === ここが重要 ===
-            # 4. 書き込む直前に、もう一度「今のデータ」を確認する（楽観的ロック）
-            # もしこの一瞬の間に誰かが保存していたら、 current_val_before と中身が変わっているはず
-            current_val_check = sheet.cell(1, 1).value
+            # ★ここがポイント：append_row は原子性がある（競合しない）
+            sheet.append_row([json_str])
             
-            if current_val_before != current_val_check:
-                # 誰かが書き換えた！ -> 失敗とみなしてループの先頭に戻る（リトライ）
-                st.toast(f"⚠️ 他の人が保存しました。再取得してリトライします... ({attempt+1}/{MAX_RETRIES})")
-                continue 
-
-            # 5. データが変わっていなければ、書き込み実行
-            json_str = json.dumps(data, ensure_ascii=False)
-            sheet.update_cell(1, 1, json_str)
-            
-            # 6. 自分の手元のデータも最新に合わせる
-            if is_tournament:
-                st.session_state.tourn_results = data['tourn_results']
-            else:
-                st.session_state.results = data['results']
-            
-            # キャッシュをクリア
+            # キャッシュをクリアして再読み込みさせる
             load_data_from_json.clear()
+            st.toast(f"✅ 試合結果を記録しました")
             
-            st.toast(f"✅ 試合 {match_key} の結果を保存しました")
-            return # 成功したので終了
-
-        except Exception as e:
-            # APIエラーなどの場合も少し待ってリトライ
-            time.sleep(1)
-            if attempt == MAX_RETRIES - 1:
-                st.error(f"保存に失敗しました: {e}")
-                return
-    
-    st.error("アクセスが混み合っており、保存できませんでした。もう一度押してください。")
+    except Exception as e:
+        st.error(f"保存エラー: {e}")
 
 def init_session_state():
     if 'initialized' not in st.session_state:
