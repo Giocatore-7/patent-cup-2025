@@ -7,6 +7,8 @@ import os
 # --- 追加ライブラリ ---
 import gspread
 from google.oauth2.service_account import Credentials
+import time   # ★追加
+import random # ★追加
 
 # ==========================================
 # 1. 設定・データ定義
@@ -232,48 +234,76 @@ def save_data_to_json():
         st.error(f"保存エラー: {e}")
 
 # ==========================================
-# ★追加：競合を防ぐための「単一試合更新」関数
+# ★修正：競合を防ぐための「リトライ機能付き」保存関数
 # ==========================================
 def save_specific_match(match_key, new_result_dict, is_tournament=False):
     """
     クラウド上の最新データを取得し、特定の1試合の結果だけを書き換えて保存する。
-    これにより、他人の入力を消してしまう事故を防ぐ。
+    【強化点】
+    1. 保存直前に「データが他人に書き換えられていないか」をチェックする
+    2. 書き換えられていたら、自動で読み込み直してリトライする（最大5回）
+    3. ランダムな待機時間を入れて、アクセスの衝突を避ける
     """
-    try:
-        sheet = get_google_sheet()
-        if sheet:
-            # 1. クラウドにある「正真正銘の最新データ」を取りに行く
-            current_val = sheet.cell(1, 1).value
-            if not current_val:
-                st.error("データの読み込みに失敗しました")
+    MAX_RETRIES = 5  # 最大5回までやり直す
+    
+    for attempt in range(MAX_RETRIES):
+        try:
+            # 1. 衝突回避のため、わざと少しだけ待つ（0.1秒〜1.0秒のランダム）
+            time.sleep(random.uniform(0.1, 1.0))
+
+            sheet = get_google_sheet()
+            if not sheet:
+                st.error("スプレッドシートが見つかりません")
                 return
-            
-            # 2. JSONを復元
-            data = json.loads(current_val)
-            
-            # 3. 指定された試合だけを書き換える（他は触らない！）
+
+            # 2. 現在のデータを取得（比較用）
+            current_val_before = sheet.cell(1, 1).value
+            if not current_val_before:
+                # データが空の場合（復旧直後など）はそのまま書き込むチャンス
+                data = init_empty_data() # ※念の為の空データ作成機能（下で定義してなくてもエラーにならないよう配慮）
+            else:
+                data = json.loads(current_val_before)
+
+            # 3. 指定された試合だけを書き換える
             if is_tournament:
                 data['tourn_results'][match_key] = new_result_dict
             else:
                 data['results'][match_key] = new_result_dict
             
-            # 4. 書き戻す
+            # === ここが重要 ===
+            # 4. 書き込む直前に、もう一度「今のデータ」を確認する（楽観的ロック）
+            # もしこの一瞬の間に誰かが保存していたら、 current_val_before と中身が変わっているはず
+            current_val_check = sheet.cell(1, 1).value
+            
+            if current_val_before != current_val_check:
+                # 誰かが書き換えた！ -> 失敗とみなしてループの先頭に戻る（リトライ）
+                st.toast(f"⚠️ 他の人が保存しました。再取得してリトライします... ({attempt+1}/{MAX_RETRIES})")
+                continue 
+
+            # 5. データが変わっていなければ、書き込み実行
             json_str = json.dumps(data, ensure_ascii=False)
             sheet.update_cell(1, 1, json_str)
             
-            # 5. 自分の手元のデータも最新に合わせる
+            # 6. 自分の手元のデータも最新に合わせる
             if is_tournament:
                 st.session_state.tourn_results = data['tourn_results']
             else:
                 st.session_state.results = data['results']
             
-            # 6. キャッシュをクリア
+            # キャッシュをクリア
             load_data_from_json.clear()
             
             st.toast(f"✅ 試合 {match_key} の結果を保存しました")
-            
-    except Exception as e:
-        st.error(f"保存エラー（再試行してください）: {e}")
+            return # 成功したので終了
+
+        except Exception as e:
+            # APIエラーなどの場合も少し待ってリトライ
+            time.sleep(1)
+            if attempt == MAX_RETRIES - 1:
+                st.error(f"保存に失敗しました: {e}")
+                return
+    
+    st.error("アクセスが混み合っており、保存できませんでした。もう一度押してください。")
 
 def init_session_state():
     if 'initialized' not in st.session_state:
