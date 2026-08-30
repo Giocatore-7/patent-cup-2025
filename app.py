@@ -168,6 +168,7 @@ TOURN_SCHED_3COURT = [
 # 2. 関数定義 (Google Sheets 対応版)
 # ==========================================
 
+@st.cache_resource(ttl=1800)
 def get_google_sheet():
     """Googleスプレッドシートに接続する関数"""
     try:
@@ -599,9 +600,9 @@ if check_password():
                 c1, c2, c3 = st.columns(3)
                 nh = c1.number_input("開始(時)", 0, 23, st.session_state.start_time_hour)
                 nm = c2.number_input("開始(分)", 0, 59, st.session_state.start_time_minute)
-                n_ld = c3.number_input("リーグ時間(分)", 1, 30, st.session_state.league_duration)
+                n_ld = c3.number_input("リーグ時間(分)", 1, , st.session_state.league_duration)
                 n_iv = c1.number_input("インターバル(分)", 0, 60, st.session_state.interval_duration)
-                n_td = c2.number_input("トーナメント時間(分)", 1, 30, st.session_state.tourn_duration)
+                n_td = c2.number_input("トーナメント時間(分)", 1, , st.session_state.tourn_duration)
                 if st.button("保存", key="sv_tm"):
                     st.session_state.start_time_hour = nh; st.session_state.start_time_minute = nm
                     st.session_state.league_duration = n_ld; st.session_state.interval_duration = n_iv
