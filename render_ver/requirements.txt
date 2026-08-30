@@ -1,6 +1,13 @@
-streamlit
-pandas
-graphviz
-SQLAlchemy
-psycopg2-binary
-matplotlib
+# パテントカップ大会アプリ / Render Web Service 用
+#
+# 注意: Streamlit Community Cloud は matplotlib などを標準で同梱しているため、
+#       Community Cloud で動いていた requirements.txt には
+#       これらが書かれていない可能性があります。
+#       Render は同梱しないので、下記が揃っていないとデプロイが失敗します。
+ 
+streamlit>=1.40        # st.query_params / st.connection を使用（1.30未満では動きません）
+pandas>=2.0            # 順位表の DataFrame
+sqlalchemy>=2.0        # st.connection("postgresql", type="sql") の実体
+psycopg2-binary>=2.9   # PostgreSQL ドライバ
+matplotlib>=3.7        # ★ df.style.background_gradient() に必須（見落としやすい）
+graphviz>=0.20         # app.py 冒頭の import graphviz に必要
