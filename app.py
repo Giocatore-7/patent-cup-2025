@@ -9,12 +9,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 import time   # ★追加
 import random # ★追加
-
 # ==========================================
 # 1. 設定・データ定義
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
-
 # パスワード管理
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
@@ -23,7 +21,6 @@ try:
 except (FileNotFoundError, KeyError):
     st.error("⛔ セキュリティエラー: パスワード設定が見つかりません。")
     st.stop()
-
 # ★【修正】CSS設定（アイコン隠しのみ。タブ固定やサイドバー操作は削除）
 st.markdown("""
     <style>
@@ -45,13 +42,10 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
-
 DATA_FILE = "patent_cup_data.json" # データを保存するファイル名
-
 # チーム名初期値
 DEFAULT_TEAMS_REGULAR = {chr(65+i): f"チーム{chr(65+i)}" for i in range(12)}
 DEFAULT_TEAMS_MIX = {chr(65+i): f"MIXチーム{chr(65+i)}" for i in range(12)}
-
 # -------------------------------------------
 # スケジュール定義
 # -------------------------------------------
@@ -66,7 +60,6 @@ SCHEDULE_TEMPLATE_4COURT = [
     [("E", "I"), ("F", "J"), ("E", "I"), ("F", "J")],
     [("G", "K"), ("H", "L"), ("G", "K"), ("H", "L")]
 ]
-
 SCHEDULE_TEMPLATE_3COURT = [
     {"id": 1, "matches": [("reg", "A", "E"), ("reg", "B", "F"), ("mix", "A", "E")]},
     {"id": 2, "matches": [("reg", "C", "G"), ("mix", "B", "F"), ("mix", "C", "G")]},
@@ -81,7 +74,6 @@ SCHEDULE_TEMPLATE_3COURT = [
     {"id": 11, "matches": [("reg", "F", "J"), ("reg", "G", "K"), ("mix", "F", "J")]},
     {"id": 12, "matches": [("reg", "H", "L"), ("mix", "G", "K"), ("mix", "H", "L")]},
 ]
-
 TOURN_SCHED_4COURT = [
     {"cup_display": "パテントクラシカルカップ", "games": [
         {"league": "reg", "cup": "Classical", "round": "SF1", "court": "A"},
@@ -120,7 +112,6 @@ TOURN_SCHED_4COURT = [
         {"league": "mix", "cup": "Champions", "round": "3rd", "court": "D"},
     ]},
 ]
-
 TOURN_SCHED_3COURT = [
     {"cup_display": "クラシカルSF", "games": [
         {"league": "reg", "cup": "Classical", "round": "SF1", "court": "A"},
@@ -163,11 +154,9 @@ TOURN_SCHED_3COURT = [
         {"league": "mix", "cup": "Champions", "round": "3rd", "court": "C"},
     ]},
 ]
-
 # ==========================================
 # 2. 関数定義 (Google Sheets 対応版)
 # ==========================================
-
 @st.cache_resource(ttl=1800)
 def get_google_sheet():
     """Googleスプレッドシートに接続する関数"""
@@ -184,10 +173,8 @@ def get_google_sheet():
     except Exception as e:
         st.error(f"スプレッドシート接続エラー: {e}")
         return None
-
 # 修正前
 # def load_data_from_json():
-
 @st.cache_data(ttl=120) # キャッシュ時間を少し短くして反応を良くします
 def load_data_from_json():
     """
@@ -198,7 +185,6 @@ def load_data_from_json():
     try:
         sheet = get_google_sheet()
         if not sheet: return None
-
         # シートの全データを一括取得（これが一番速い）
         all_values = sheet.get_all_values()
         
@@ -209,7 +195,6 @@ def load_data_from_json():
             current_data = json.loads(all_values[0][0])
         except:
             return None # データが壊れている場合
-
         # 2行目以降は「変更ログ」なので、順番に適用していく
         # ログの形式: [json_string] (中身は {'k': match_key, 'v': result, 't': is_tournament})
         if len(all_values) > 1:
@@ -228,12 +213,10 @@ def load_data_from_json():
                             current_data['results'][m_key] = res
                     except:
                         continue # 壊れたログは無視
-
         return current_data
             
     except Exception as e:
         return None
-
 def save_data_to_json():
     """
     【管理者用】
@@ -269,7 +252,6 @@ def save_data_to_json():
             st.toast("✅ 設定を保存し、データを最適化しました")
     except Exception as e:
         st.error(f"保存エラー: {e}")
-
 def save_specific_match(match_key, new_result_dict, is_tournament=False):
     """
     【追記型・即時反映版】
@@ -302,7 +284,6 @@ def save_specific_match(match_key, new_result_dict, is_tournament=False):
             
     except Exception as e:
         st.error(f"保存エラー: {e}")
-
 def init_session_state():
     if 'initialized' not in st.session_state:
         saved_data = load_data_from_json()
@@ -314,7 +295,6 @@ def init_session_state():
         st.session_state.edit_mode_settings = False
         st.session_state.edit_mode_teams = False
         st.session_state.editing_match_id = None
-
         if saved_data:
             st.session_state.app_title = saved_data.get('app_title', "パテントカップ2025")
             st.session_state.teams_reg = saved_data.get('teams_reg', DEFAULT_TEAMS_REGULAR.copy())
@@ -341,7 +321,6 @@ def init_session_state():
             if 'interval_duration' not in st.session_state: st.session_state.interval_duration = 15
         
         st.session_state.initialized = True
-
     # URLパラメータによる自動ログイン
     query_params = st.query_params
     if st.session_state.auth_status is None:
@@ -350,11 +329,9 @@ def init_session_state():
             st.session_state.auth_status = "view"
         elif role == "admin_secret":
             st.session_state.auth_status = "admin"
-
 def check_password():
     if st.session_state.auth_status is not None:
         return True
-
     st.markdown("## 🔐 ログイン")
     st.caption("一度ログインすると、次回からは自動で表示されます。")
     password = st.text_input("パスワードを入力", type="password")
@@ -371,11 +348,9 @@ def check_password():
         else:
             st.error("パスワードが違います")
     return False
-
 def get_team_name(league, code):
     if league == "reg": return st.session_state.teams_reg.get(code, code)
     else: return st.session_state.teams_mix.get(code, code)
-
 def calculate_standings(league_type):
     teams_map = st.session_state.teams_reg if league_type == "reg" else st.session_state.teams_mix
     data = []
@@ -404,14 +379,12 @@ def calculate_standings(league_type):
     df = df.sort_values(by=["勝点", "得失差", "得点", "SortIndex"], ascending=[False, False, False, True])
     df.insert(0, "順位", range(1, len(df) + 1))
     return df
-
 # --- トーナメント処理 ---
 def get_cup_ranks(cup_name):
     if cup_name == "Champions": return 0
     if cup_name == "Elite": return 4
     if cup_name == "Classical": return 8
     return 0
-
 def get_tourn_match_result(match_id):
     res = st.session_state.tourn_results.get(match_id, {'s1': None, 's2': None, 'pk1': None, 'pk2': None})
     winner, loser = None, None
@@ -425,7 +398,6 @@ def get_tourn_match_result(match_id):
                 if pk1 > pk2: winner, loser = "left", "right"
                 elif pk2 > pk1: winner, loser = "right", "left"
     return res, winner, loser
-
 def resolve_tournament_team(league, cup, round_name, ranks_list, match_id_prefix):
     start_idx = get_cup_ranks(cup)
     if len(ranks_list) < 12: return None
@@ -436,7 +408,6 @@ def resolve_tournament_team(league, cup, round_name, ranks_list, match_id_prefix
     if round_name == "SF1_Opp": return t4
     if round_name == "SF2": return t2
     if round_name == "SF2_Opp": return t3
-
     sf1_id = f"{league}_{cup}_SF1"; sf2_id = f"{league}_{cup}_SF2"
     _, w1, l1 = get_tourn_match_result(sf1_id)
     _, w2, l2 = get_tourn_match_result(sf2_id)
@@ -445,13 +416,11 @@ def resolve_tournament_team(league, cup, round_name, ranks_list, match_id_prefix
     lose1 = t1 if w1=="right" else t4 if w1=="left" else None
     win2 = t2 if w2=="left" else t3 if w2=="right" else None
     lose2 = t2 if w2=="right" else t3 if w2=="left" else None
-
     if round_name == "Final": return win1
     if round_name == "Final_Opp": return win2
     if round_name == "3rd": return lose1
     if round_name == "3rd_Opp": return lose2
     return None
-
 def render_match_card(league_type, title, match_id, team_l, team_r, court, is_admin):
     res, _, _ = get_tourn_match_result(match_id)
     header_color = "#FFF0F5" if league_type == "mix" else "#E6F3FF"
@@ -462,7 +431,6 @@ def render_match_card(league_type, title, match_id, team_l, team_r, court, is_ad
         t_l_show = team_l if team_l else "Wait"
         t_r_show = team_r if team_r else "Wait"
         st.write(f"**{t_l_show}** vs **{t_r_show}**")
-
         if is_admin:
             if st.session_state.editing_match_id == match_id:
                 c1, c2 = st.columns(2)
@@ -480,7 +448,6 @@ def render_match_card(league_type, title, match_id, team_l, team_r, court, is_ad
                     # st.session_state.tourn_results[match_id] = {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}
                     # save_data_to_json() 
                     # st.session_state.editing_match_id = None; st.rerun()
-
                     # --- 修正後 ---
                     save_specific_match(match_id, {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}, is_tournament=True)
                     st.session_state.editing_match_id = None
@@ -504,7 +471,6 @@ def render_match_card(league_type, title, match_id, team_l, team_r, court, is_ad
                 st.markdown(f"### {txt}")
             else:
                 st.write("ー")
-
 def render_graphviz_bracket(cup_name, team_list, league, league_label):
     st.markdown(f"#### {league_label} {cup_name}")
     if len(team_list) < 12:
@@ -554,12 +520,10 @@ def render_graphviz_bracket(cup_name, team_list, league, league_label):
     }}
     """
     st.graphviz_chart(dot_code)
-
 # ==========================================
 # 4. メイン処理
 # ==========================================
 init_session_state()
-
 # --- メイン画面上部の管理者設定（サイドバー廃止） ---
 if check_password():
     is_admin = (st.session_state.auth_status == "admin")
@@ -600,9 +564,9 @@ if check_password():
                 c1, c2, c3 = st.columns(3)
                 nh = c1.number_input("開始(時)", 0, 23, st.session_state.start_time_hour)
                 nm = c2.number_input("開始(分)", 0, 59, st.session_state.start_time_minute)
-                n_ld = c3.number_input("リーグ時間(分)", 1, , st.session_state.league_duration)
+                n_ld = c3.number_input("リーグ時間(分)", 1, 30, st.session_state.league_duration)
                 n_iv = c1.number_input("インターバル(分)", 0, 60, st.session_state.interval_duration)
-                n_td = c2.number_input("トーナメント時間(分)", 1, , st.session_state.tourn_duration)
+                n_td = c2.number_input("トーナメント時間(分)", 1, 30, st.session_state.tourn_duration)
                 if st.button("保存", key="sv_tm"):
                     st.session_state.start_time_hour = nh; st.session_state.start_time_minute = nm
                     st.session_state.league_duration = n_ld; st.session_state.interval_duration = n_iv
@@ -627,7 +591,6 @@ if check_password():
                         st.form_submit_button("保存")
                 if st.button("編集完了（保存）", key="en_te"): 
                     save_data_to_json(); st.session_state.edit_mode_teams=False; st.rerun()
-
             # 5. データの完全初期化
             st.markdown("---")
             st.error("【危険】データの完全初期化")
@@ -675,7 +638,6 @@ if check_password():
                         st.error(f"初期化エラー: {e}")
                 else:
                     st.error("パスワードが違います")
-
         # ログアウトボタン（管理者用）
         if st.button("ログアウト", key="admin_logout"):
             st.session_state.auth_status = None
@@ -688,7 +650,6 @@ if check_password():
             st.session_state.auth_status = None
             st.query_params.clear()
             st.rerun()
-
     # === メインコンテンツ ===
     st.title(f"⚽ {st.session_state.app_title}")
     
@@ -697,7 +658,6 @@ if check_password():
     
     df_reg = calculate_standings("reg")
     df_mix = calculate_standings("mix")
-
     # Tab 1: 順位表
     with tab1:
         # カラム設定を追加（チーム名の幅を固定）
@@ -718,7 +678,6 @@ if check_password():
                 hide_index=True,
                 column_config=common_cfg
             )
-
     # Tab 2: リーグ戦
     with tab2:
         base_time = datetime(2025, 1, 1, st.session_state.start_time_hour, st.session_state.start_time_minute)
@@ -738,7 +697,6 @@ if check_password():
                     games.append({"type": m_info[0], "c": ["A","B","C"][idx], "p": (m_info[1], m_info[2])})
                 matches_to_show.append({"time": base_time + timedelta(minutes=i*st.session_state.league_duration), "games": games})
             league_end_time = base_time + timedelta(minutes=12*st.session_state.league_duration)
-
         for i, slot in enumerate(matches_to_show):
             st.markdown(f"#### 第{i+1}試合帯 ({slot['time'].strftime('%H:%M')})")
             cols = st.columns(len(slot['games']))
@@ -767,7 +725,6 @@ if check_password():
                                     # st.session_state.results[match_key] = {'s1': v1, 's2': v2}
                                     # save_data_to_json() 
                                     # st.session_state.editing_match_id = None; st.rerun()
-
                                     # --- 修正後 ---
                                     save_specific_match(match_key, {'s1': v1, 's2': v2}, is_tournament=False)
                                     st.session_state.editing_match_id = None
@@ -782,7 +739,6 @@ if check_password():
                         else:
                             st.write(f"### {res['s1']} - {res['s2']}" if res['s1'] is not None else "ー")
             st.divider()
-
     with tab3:
         tourn_start = league_end_time + timedelta(minutes=st.session_state.interval_duration)
         st.info(f"🏆 トーナメント開始: {tourn_start.strftime('%H:%M')} (リーグ終了 {league_end_time.strftime('%H:%M')} + {st.session_state.interval_duration}分後)")
@@ -805,15 +761,12 @@ if check_password():
                     else:
                         t_left = resolve_tournament_team(game['league'], game['cup'], game['round'], team_list, "")
                         t_right = resolve_tournament_team(game['league'], game['cup'], f"{game['round']}_Opp", team_list, "")
-
                     render_match_card(game['league'], f"{game['cup']} {game['round']}", m_id, t_left, t_right, game['court'], is_admin)
             st.divider()
-
     with tab4:
         st.header("決勝トーナメント表")
         reg_ranks_list = df_reg["チーム名"].tolist()
         mix_ranks_list = df_mix["チーム名"].tolist()
-
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("🟦 ガチリーグ")
