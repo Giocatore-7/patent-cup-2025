@@ -188,7 +188,7 @@ def get_google_sheet():
 # 修正前
 # def load_data_from_json():
 
-@st.cache_data(ttl=30) # キャッシュ時間を少し短くして反応を良くします
+@st.cache_data(ttl=120) # キャッシュ時間を少し短くして反応を良くします
 def load_data_from_json():
     """
     【追記型】
