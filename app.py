@@ -160,19 +160,16 @@ TOURN_SCHED_3COURT = [
 @st.cache_resource(ttl=1800)
 def get_google_sheet():
     """Googleスプレッドシートに接続する関数"""
-    try:
-        # SecretsからJSONキーの文字列を取得して辞書に変換
-        key_dict = json.loads(st.secrets["GCP_JSON_KEY"])
-        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_info(key_dict, scopes=scopes)
-        client = gspread.authorize(creds)
+    # SecretsからJSONキーの文字列を取得して辞書に変換
+    key_dict = json.loads(st.secrets["GCP_JSON_KEY"])
+    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(key_dict, scopes=scopes)
+    client = gspread.authorize(creds)
         
-        # シートを開く
-        sheet_name = st.secrets["SPREADSHEET_NAME"]
-        return client.open(sheet_name).sheet1
-    except Exception as e:
-        st.error(f"スプレッドシート接続エラー: {e}")
-        return None
+    # シートを開く
+    sheet_name = st.secrets["SPREADSHEET_NAME"]
+    return client.open(sheet_name).sheet1
+    
 # 修正前
 # def load_data_from_json():
 @st.cache_data(ttl=120) # キャッシュ時間を少し短くして反応を良くします
