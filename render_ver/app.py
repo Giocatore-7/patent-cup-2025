@@ -19,7 +19,13 @@ except (FileNotFoundError, KeyError):
     st.error("⛔ セキュリティエラー: パスワード設定が見つかりません。")
     st.stop()
 
-# CSS設定（★スマホでタブ4つが収まるように圧縮）
+# ★入力者モード用パスワード。未設定でもアプリは落ちない（入力者モードが無効になるだけ）。
+try:
+    INPUT_PASS = st.secrets["INPUT_PASS"]
+except (FileNotFoundError, KeyError):
+    INPUT_PASS = None
+
+# CSS設定（スマホでタブ4つが収まるように圧縮）
 st.markdown("""
     <style>
     [data-testid="stToolbar"] { display: none !important; }
@@ -27,7 +33,6 @@ st.markdown("""
     footer { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
 
-    /* タブを折り返さず、はみ出さないよう圧縮する */
     .stTabs [data-baseweb="tab-list"] {
         gap: 4px !important;
         overflow-x: visible !important;
@@ -39,7 +44,6 @@ st.markdown("""
         white-space: nowrap !important;
         min-width: 0 !important;
     }
-    /* baseweb がタブ数過多のときに出す左右スクロールボタンを隠す */
     .stTabs [data-baseweb="tab-list"] > button[aria-label] { display: none !important; }
 
     @media (max-width: 520px) {
@@ -163,7 +167,6 @@ TOURN_SCHED_3COURT = [
     ]},
 ]
 
-# カップの日本語表示名（★見出しから Champions/Elite/Classical を消すため）
 CUP_LABEL_JA = {
     "Champions": "パテントチャンピオンズカップ",
     "Elite": "パテントエリートカップ",
@@ -202,7 +205,6 @@ def get_conn():
 
 @st.cache_resource
 def init_db():
-    """テーブルが無ければ作る（プロセスにつき1回）"""
     conn = get_conn()
     with conn.session as s:
         s.execute(text("""
@@ -222,10 +224,7 @@ def _as_dict(v):
 
 
 def _replay(rows):
-    """
-    ログを再生して最新状態を作る。
-    ★修正: init行が無くても match行を取りこぼさない（デフォルト状態から積む）。
-    """
+    """init行が無くても match行を取りこぼさない"""
     data = _default_state()
     for log_type, log_data in rows:
         d = _as_dict(log_data)
@@ -248,10 +247,7 @@ def _replay(rows):
 
 @st.cache_data(ttl=5, show_spinner=False)
 def load_state():
-    """
-    ★修正: 毎回DBから最新状態を読む（全セッション共有キャッシュ・5秒）。
-    これにより管理者どうし／閲覧者の見えているデータが常に一致する。
-    """
+    """毎回DBから最新状態を読む（全セッション共有キャッシュ・5秒）"""
     conn = get_conn()
     df = conn.query(
         "SELECT log_type, log_data FROM patent_cup_logs ORDER BY id ASC", ttl=0)
@@ -260,7 +256,6 @@ def load_state():
 
 
 def save_match(match_key, result_dict, is_tournament=False):
-    """試合結果を1行 INSERT する（追記のみ。競合しない）"""
     try:
         payload = {'k': match_key, 'v': result_dict, 't': bool(is_tournament)}
         conn = get_conn()
@@ -280,11 +275,7 @@ def save_match(match_key, result_dict, is_tournament=False):
 
 
 def save_settings(changes):
-    """
-    ★修正: 設定保存で他人のスコアを消さない。
-    テーブルをロックし、DBから最新を読み直して設定項目だけ差し替えてから
-    スナップショットを書く。results / tourn_results は必ずDB側の最新を使う。
-    """
+    """テーブルをロックし、DBの最新を読み直してから設定だけ差し替える"""
     try:
         conn = get_conn()
         with conn.session as s:
@@ -334,10 +325,6 @@ def reset_all():
 # 3. ロジック
 # ==========================================
 def valid_league_keys(court_mode):
-    """
-    ★修正: 現在のコート数で実際に存在する試合キーだけを有効にする。
-    4面⇔3面を切り替えても、古いキーが順位表に混ざらない。
-    """
     keys = set()
     if court_mode == "4面":
         for i, slot in enumerate(SCHEDULE_TEMPLATE_4COURT):
@@ -359,9 +346,7 @@ def calculate_standings(state, league_type):
         st_ = {"チーム名": name, "勝点": 0, "試合数": 0, "勝": 0, "引": 0, "負": 0,
                "得点": 0, "失点": 0, "得失差": 0, "SortIndex": ord(code) - 65}
         for key, res in state['results'].items():
-            if key not in allowed:
-                continue
-            if not key.startswith(f"{league_type}_"):
+            if key not in allowed or not key.startswith(f"{league_type}_"):
                 continue
             parts = key.split("_")
             if len(parts) < 4:
@@ -397,7 +382,6 @@ def calculate_standings(state, league_type):
 
 
 def league_progress(state, league_type):
-    """入力済み試合数 / 全試合数"""
     allowed = {k for k in valid_league_keys(state['court_mode'])
                if k.startswith(f"{league_type}_")}
     done = sum(1 for k in allowed
@@ -410,7 +394,6 @@ def get_cup_ranks(cup_name):
 
 
 def match_result(state, match_id):
-    """(結果dict, 勝者) を返す。勝者は 'left' / 'right' / None"""
     res = state['tourn_results'].get(
         match_id, {'s1': None, 's2': None, 'pk1': None, 'pk2': None})
     s1, s2 = res.get('s1'), res.get('s2')
@@ -431,7 +414,6 @@ def match_result(state, match_id):
 
 
 def cup_teams(state, league, cup):
-    """そのカップの 1〜4位（=SFの4チーム）"""
     ranks = calculate_standings(state, league)["チーム名"].tolist()
     if len(ranks) < 12:
         return None
@@ -440,9 +422,6 @@ def cup_teams(state, league, cup):
 
 
 def resolve_slot(state, league, cup, slot):
-    """
-    slot: SF1 / SF1_Opp / SF2 / SF2_Opp / Final / Final_Opp / 3rd / 3rd_Opp
-    """
     teams = cup_teams(state, league, cup)
     if teams is None:
         return None
@@ -455,20 +434,17 @@ def resolve_slot(state, league, cup, slot):
         return t2
     if slot == "SF2_Opp":
         return t3
-
     _, w1 = match_result(state, f"{league}_{cup}_SF1")
     _, w2 = match_result(state, f"{league}_{cup}_SF2")
     win1 = t1 if w1 == "left" else (t4 if w1 == "right" else None)
     lose1 = t4 if w1 == "left" else (t1 if w1 == "right" else None)
     win2 = t2 if w2 == "left" else (t3 if w2 == "right" else None)
     lose2 = t3 if w2 == "left" else (t2 if w2 == "right" else None)
-
     return {"Final": win1, "Final_Opp": win2,
             "3rd": lose1, "3rd_Opp": lose2}.get(slot)
 
 
 def schedule_times(state):
-    """リーグ終了時刻とトーナメント開始時刻を、タブの外で計算する"""
     base = datetime(2025, 1, 1, state['start_time_hour'], state['start_time_minute'])
     n_slots = 9 if state['court_mode'] == "4面" else 12
     league_end = base + timedelta(minutes=n_slots * state['league_duration'])
@@ -479,8 +455,10 @@ def schedule_times(state):
 # ==========================================
 # 4. トーナメント表（SVG）
 # ==========================================
+RED, GRAY = "#d32f2f", "#b0b0b0"
+
+
 def _score_labels(res):
-    """(左スコア表示, 右スコア表示)。PKがあれば 2(5) の形式。"""
     if not res or res.get('s1') is None or res.get('s2') is None:
         return "", ""
     s1, s2 = res['s1'], res['s2']
@@ -490,62 +468,121 @@ def _score_labels(res):
     return str(s1), str(s2)
 
 
-def _clip(s, n=8):
-    if s is None:
-        return ""
-    s = str(s)
-    return s if len(s) <= n else s[:n] + "…"
+def _text_w(s, fs):
+    """全角=1.0em、半角=0.55em で概算"""
+    return sum(fs * (0.55 if ord(c) < 0x2E80 else 1.0) for c in s)
+
+
+def _fit_lines(name, avail, max_fs=12, min_fs=7.5):
+    """★チーム名が枠に必ず収まるよう、フォント縮小→2行折り返しの順で調整する"""
+    name = str(name or "")
+    if not name:
+        return [""], max_fs
+
+    def two_lines(fs):
+        cut = 0
+        for i in range(1, len(name) + 1):
+            if _text_w(name[:i], fs) <= avail:
+                cut = i
+            else:
+                break
+        if cut and _text_w(name[cut:], fs) <= avail:
+            return [name[:cut], name[cut:]]
+        return None
+
+    # 1) まずは大きめのフォントで1行
+    for fs in (max_fs, 11, 10):
+        if _text_w(name, fs) <= avail:
+            return [name], fs
+    # 2) 入らなければ「小さい1行」より「読める2行」を優先する
+    for fs in (11, 10, 9, 8):
+        lines = two_lines(fs)
+        if lines:
+            return lines, fs
+    # 3) それでも駄目なら小さい1行
+    for fs in (9, 8, min_fs):
+        if _text_w(name, fs) <= avail:
+            return [name], fs
+    # 4) 最終手段
+    lines = two_lines(min_fs)
+    if lines:
+        return lines, min_fs
+    half = max(1, len(name) // 2)
+    return [name[:half], name[half:]], min_fs
+
+
+def _lines_svg(x, cy, lines, fs, weight, anchor="start", fill="#1a1a1a"):
+    lh = fs * 1.18
+    if len(lines) == 1:
+        ys = [cy + fs * 0.36]
+    else:
+        ys = [cy - lh / 2 + fs * 0.36, cy + lh / 2 + fs * 0.36]
+    out = []
+    for ln, y in zip(lines, ys):
+        out.append(f'<text x="{x}" y="{y:.1f}" font-size="{fs}" font-weight="{weight}" '
+                   f'text-anchor="{anchor}" fill="{fill}">{html.escape(ln)}</text>')
+    return "".join(out)
 
 
 def _box(x, y, w, h, name, score, rank=None, win=False, fill="#ffffff"):
-    """SVGの1チーム枠"""
-    stroke = "#d32f2f" if win else "#8a8a8a"
+    stroke = RED if win else "#8a8a8a"
     sw = 2 if win else 1
     weight = "600" if win else "400"
-    parts = [
-        f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="5" '
-        f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>'
-    ]
-    tx = x + 7
+    pad_l = 7
+    rank_w = 20 if rank is not None else 0
+    score_w = 32 if score else 0
+    avail = w - pad_l - rank_w - score_w - 6
+    lines, fs = _fit_lines(name, avail)
+    cy = y + h / 2
+    parts = [f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="5" '
+             f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>']
     if rank is not None:
-        parts.append(
-            f'<text x="{x+7}" y="{y+h/2+4}" font-size="10" fill="#777">{rank}位</text>')
-        tx = x + 28
-    parts.append(
-        f'<text x="{tx}" y="{y+h/2+4}" font-size="12" font-weight="{weight}" '
-        f'fill="#1a1a1a">{html.escape(_clip(name))}</text>')
+        parts.append(f'<text x="{x+pad_l}" y="{cy+4}" font-size="10" '
+                     f'fill="#777">{rank}位</text>')
+    parts.append(_lines_svg(x + pad_l + rank_w, cy, lines, fs, weight))
     if score:
-        parts.append(
-            f'<text x="{x+w-7}" y="{y+h/2+4}" font-size="13" font-weight="700" '
-            f'text-anchor="end" fill="#1a1a1a">{html.escape(score)}</text>')
+        parts.append(f'<text x="{x+w-7}" y="{cy+4.5}" font-size="13" font-weight="700" '
+                     f'text-anchor="end" fill="#1a1a1a">{html.escape(score)}</text>')
     return "".join(parts)
 
 
+def _seg(x1, y1, x2, y2, red):
+    c = RED if red else GRAY
+    sw = 2.2 if red else 1
+    return (f'<path d="M{x1} {y1} L{x2} {y2}" stroke="{c}" stroke-width="{sw}" '
+            f'fill="none" stroke-linecap="round"/>')
+
+
 def _link(x_from, x_to, y1, y2, win):
-    """2つの枠から次の枠へ伸びる接続線。win は 'top'/'bottom'/None"""
+    """
+    ★勝者の経路を「枠 → 横 → 縦 → 横 → 次の枠」まで途切れず赤くする。
+    縦線を中点で2分割し、勝者側の半分だけを赤くするのがポイント。
+    """
     xm = (x_from + x_to) / 2
     ym = (y1 + y2) / 2
-    c_top = "#d32f2f" if win == "top" else "#b0b0b0"
-    c_bot = "#d32f2f" if win == "bottom" else "#b0b0b0"
-    c_out = "#d32f2f" if win else "#b0b0b0"
-    w_top = 2 if win == "top" else 1
-    w_bot = 2 if win == "bottom" else 1
-    return (
-        f'<path d="M{x_from} {y1} H{xm}" stroke="{c_top}" stroke-width="{w_top}" fill="none"/>'
-        f'<path d="M{x_from} {y2} H{xm}" stroke="{c_bot}" stroke-width="{w_bot}" fill="none"/>'
-        f'<path d="M{xm} {y1} V{y2}" stroke="#b0b0b0" stroke-width="1" fill="none"/>'
-        f'<path d="M{xm} {ym} H{x_to}" stroke="{c_out}" stroke-width="{2 if win else 1}" fill="none"/>'
-    )
+    top, bot = (win == "top"), (win == "bottom")
+    return "".join([
+        _seg(x_from, y1, xm, y1, top),
+        _seg(x_from, y2, xm, y2, bot),
+        _seg(xm, y1, xm, ym, top),
+        _seg(xm, ym, xm, y2, bot),
+        _seg(xm, ym, x_to, ym, bool(win)),
+    ])
+
+
+X1, W1 = 4, 158
+X2, W2 = 174, 138
+X3, W3 = 326, 110
+BH = 34
+SVG_W, SVG_H = 444, 320
 
 
 def bracket_svg(state, league, cup):
-    """スコア入りのトーナメント表をSVGで描く"""
     teams = cup_teams(state, league, cup)
     if teams is None:
         return None
     t1, t2, t3, t4 = teams
     i = get_cup_ranks(cup)
-    r1, r2, r3, r4 = i + 1, i + 2, i + 3, i + 4
 
     sf1, w_sf1 = match_result(state, f"{league}_{cup}_SF1")
     sf2, w_sf2 = match_result(state, f"{league}_{cup}_SF2")
@@ -564,58 +601,46 @@ def bracket_svg(state, league, cup):
     champ = fin_l if w_fin == "left" else (fin_r if w_fin == "right" else "優勝")
     third = trd_l if w_trd == "left" else (trd_r if w_trd == "right" else "3位")
 
-    X1, W1 = 4, 150
-    X2, W2 = 170, 130
-    X3, W3 = 316, 104
-    H = 30
-    W_TOTAL, H_TOTAL = 428, 300
-
     bg = "#FFF4F8" if league == "mix" else "#EFF6FF"
-    p = [f'<svg viewBox="0 0 {W_TOTAL} {H_TOTAL}" xmlns="http://www.w3.org/2000/svg" '
-         f'style="width:100%;max-width:520px;height:auto;display:block">',
-         f'<rect x="0" y="0" width="{W_TOTAL}" height="{H_TOTAL}" rx="8" fill="{bg}"/>',
+    p = [f'<svg viewBox="0 0 {SVG_W} {SVG_H}" xmlns="http://www.w3.org/2000/svg" '
+         f'role="img" style="width:100%;max-width:560px;height:auto;display:block">',
+         f'<rect x="0" y="0" width="{SVG_W}" height="{SVG_H}" rx="8" fill="{bg}"/>',
          f'<text x="{X1+4}" y="14" font-size="11" font-weight="700" fill="#555">準決勝</text>',
          f'<text x="{X2+4}" y="14" font-size="11" font-weight="700" fill="#555">決勝</text>']
 
-    # --- 本戦 ---
-    y_a1, y_a2 = 22, 60
-    y_b1, y_b2 = 130, 168
-    y_f1 = (y_a1 + y_a2) / 2
-    y_f2 = (y_b1 + y_b2) / 2
-    y_ch = (y_f1 + y_f2) / 2
+    ya1, ya2 = 22, 64
+    yb1, yb2 = 140, 182
+    yf1, yf2, ych = 43, 161, 99
 
-    p.append(_link(X1 + W1, X2, y_a1 + H / 2, y_a2 + H / 2,
+    p.append(_link(X1 + W1, X2, ya1 + BH / 2, ya2 + BH / 2,
                    "top" if w_sf1 == "left" else ("bottom" if w_sf1 == "right" else None)))
-    p.append(_link(X1 + W1, X2, y_b1 + H / 2, y_b2 + H / 2,
+    p.append(_link(X1 + W1, X2, yb1 + BH / 2, yb2 + BH / 2,
                    "top" if w_sf2 == "left" else ("bottom" if w_sf2 == "right" else None)))
-    p.append(_link(X2 + W2, X3, y_f1 + H / 2, y_f2 + H / 2,
+    p.append(_link(X2 + W2, X3, yf1 + BH / 2, yf2 + BH / 2,
                    "top" if w_fin == "left" else ("bottom" if w_fin == "right" else None)))
 
-    p.append(_box(X1, y_a1, W1, H, t1, a1, r1, w_sf1 == "left"))
-    p.append(_box(X1, y_a2, W1, H, t4, a2, r4, w_sf1 == "right"))
-    p.append(_box(X1, y_b1, W1, H, t2, b1, r2, w_sf2 == "left"))
-    p.append(_box(X1, y_b2, W1, H, t3, b2, r3, w_sf2 == "right"))
-    p.append(_box(X2, y_f1, W2, H, fin_l, f1, None, w_fin == "left", "#FFFFFF"))
-    p.append(_box(X2, y_f2, W2, H, fin_r, f2, None, w_fin == "right", "#FFFFFF"))
-    p.append(_box(X3, y_ch, W3, H + 6, champ, "", None, w_fin is not None, "#FFD86B"))
+    p.append(_box(X1, ya1, W1, BH, t1, a1, i + 1, w_sf1 == "left"))
+    p.append(_box(X1, ya2, W1, BH, t4, a2, i + 4, w_sf1 == "right"))
+    p.append(_box(X1, yb1, W1, BH, t2, b1, i + 2, w_sf2 == "left"))
+    p.append(_box(X1, yb2, W1, BH, t3, b2, i + 3, w_sf2 == "right"))
+    p.append(_box(X2, yf1, W2, BH, fin_l, f1, None, w_fin == "left"))
+    p.append(_box(X2, yf2, W2, BH, fin_r, f2, None, w_fin == "right"))
+    p.append(_box(X3, ych, W3, BH + 6, champ, "", None, w_fin is not None, "#FFD86B"))
 
-    # --- 3位決定戦 ---
-    y_d1, y_d2 = 218, 256
-    y_th = (y_d1 + y_d2) / 2
-    p.append(f'<text x="{X1+4}" y="210" font-size="11" font-weight="700" '
+    yd1, yd2, yth = 236, 278, 257
+    p.append(f'<text x="{X1+4}" y="228" font-size="11" font-weight="700" '
              f'fill="#555">3位決定戦</text>')
-    p.append(_link(X1 + W1, X2, y_d1 + H / 2, y_d2 + H / 2,
+    p.append(_link(X1 + W1, X2, yd1 + BH / 2, yd2 + BH / 2,
                    "top" if w_trd == "left" else ("bottom" if w_trd == "right" else None)))
-    p.append(_box(X1, y_d1, W1, H, trd_l, d1, None, w_trd == "left", "#F7FAFF"))
-    p.append(_box(X1, y_d2, W1, H, trd_r, d2, None, w_trd == "right", "#F7FAFF"))
-    p.append(_box(X2, y_th, W2, H, third, "", None, w_trd is not None, "#FFF6C2"))
+    p.append(_box(X1, yd1, W1, BH, trd_l, d1, None, w_trd == "left", "#F7FAFF"))
+    p.append(_box(X1, yd2, W1, BH, trd_r, d2, None, w_trd == "right", "#F7FAFF"))
+    p.append(_box(X2, yth, W2, BH, third, "", None, w_trd is not None, "#FFF6C2"))
 
     p.append('</svg>')
     return "".join(p)
 
 
 def render_bracket(state, league, cup):
-    """★見出しから Champions/Elite/Classical を除去。MIXは残す。"""
     label = CUP_LABEL_JA[cup] + ("MIX" if league == "mix" else "")
     icon = "🟧" if league == "mix" else "🟦"
     st.markdown(f"##### {icon} {label}")
@@ -627,8 +652,11 @@ def render_bracket(state, league, cup):
 
 
 # ==========================================
-# 5. 認証
+# 5. 認証（管理者 / 入力者 / 閲覧者）
 # ==========================================
+ROLE_LABEL = {"admin": "管理者", "input": "入力者", "view": "閲覧者"}
+
+
 def init_session():
     init_db()
     ss = st.session_state
@@ -638,9 +666,7 @@ def init_session():
     ss.setdefault('edit_mode_settings', False)
     ss.setdefault('edit_mode_teams', False)
     ss.setdefault('editing_match_id', None)
-
-    # ★修正: 管理者ロールはURLに載せない（URLを共有すると管理者権限が漏れるため）。
-    #        閲覧者ロールのみ、再ログインの手間を省くためURLに残す。
+    # 閲覧者だけURLに残す（管理者・入力者はURL共有で権限が漏れるため載せない）
     if ss.auth_status is None and st.query_params.get("role") == "player":
         ss.auth_status = "view"
 
@@ -650,11 +676,16 @@ def check_password():
     if ss.auth_status is not None:
         return True
     st.markdown("## 🔐 ログイン")
-    st.caption("閲覧用パスワードは一度入力すると次回から自動で表示されます。")
+    st.caption("閲覧用パスワードは一度入力すると次回から自動で表示されます。"
+               "管理者・入力者は毎回入力が必要です。")
     password = st.text_input("パスワードを入力", type="password")
     if st.button("ログイン"):
         if password == ADMIN_PASS:
             ss.auth_status = "admin"
+            st.query_params.clear()
+            st.rerun()
+        elif INPUT_PASS and password == INPUT_PASS:
+            ss.auth_status = "input"
             st.query_params.clear()
             st.rerun()
         elif password == VIEW_PASS:
@@ -672,6 +703,9 @@ def check_password():
 def admin_panel(state):
     ss = st.session_state
     with st.expander("⚙️ 管理者設定 (設定・リセット)", expanded=False):
+        if INPUT_PASS is None:
+            st.warning("入力者モードのパスワード（INPUT_PASS）が未設定です。"
+                       "Secrets に追加すると入力者モードが使えます。")
         st.caption("※ 設定を保存しても、入力済みの試合結果は消えません。")
 
         st.markdown("##### タイトル設定")
@@ -748,7 +782,6 @@ def admin_panel(state):
                 ss.edit_mode_teams = True
                 st.rerun()
         else:
-            # セッションが途中で失われた場合に備えて必ずバッファを用意する
             if 'buf_reg' not in ss:
                 ss.buf_reg = dict(state['teams_reg'])
             if 'buf_mix' not in ss:
@@ -788,7 +821,7 @@ def admin_panel(state):
                 st.error("パスワードが違います")
 
 
-def league_tab(state, is_admin):
+def league_tab(state, can_edit):
     base, _, _ = schedule_times(state)
     ss = st.session_state
     slots = []
@@ -831,7 +864,7 @@ def league_tab(state, is_admin):
                         f'{label}</div>', unsafe_allow_html=True)
                     st.write(f"**{home_name}** vs **{away_name}**")
                     res = state['results'].get(match_key) or {'s1': None, 's2': None}
-                    if not is_admin:
+                    if not can_edit:
                         st.write(f"### {res['s1']} - {res['s2']}"
                                  if res.get('s1') is not None else "ー")
                         continue
@@ -863,7 +896,7 @@ def league_tab(state, is_admin):
         st.divider()
 
 
-def tourn_card(state, game, is_admin):
+def tourn_card(state, game, can_edit):
     ss = st.session_state
     league, cup, rnd, court = game['league'], game['cup'], game['round'], game['court']
     m_id = f"{league}_{cup}_{rnd}"
@@ -888,7 +921,7 @@ def tourn_card(state, game, is_admin):
                 txt += f" (PK {res.get('pk1')}-{res.get('pk2')})"
             st.markdown(f"### {txt}")
 
-        if not is_admin:
+        if not can_edit:
             if res.get('s1') is not None:
                 show_score()
             else:
@@ -911,7 +944,6 @@ def tourn_card(state, game, is_admin):
                                       key=f"{m_id}_pk2")
             b1, b2 = st.columns(2)
             if b1.button("保存", key=f"sv_{m_id}", type="primary"):
-                # ★修正: 引き分け＋PK同点は勝者が決まらず、次のラウンドが入力不能になる
                 if v1 == v2 and pk1 == pk2:
                     st.error("PKのスコアが同点です。勝者が決まらないため保存できません。")
                 else:
@@ -943,12 +975,15 @@ def tourn_card(state, game, is_admin):
 init_session()
 
 if check_password():
-    is_admin = (st.session_state.auth_status == "admin")
+    role = st.session_state.auth_status
+    is_admin = (role == "admin")
+    can_edit = role in ("admin", "input")          # ★入力者もスコア編集可
     state = load_state()
 
     head_l, head_r = st.columns([4, 1])
     with head_l:
         st.title(f"⚽ {state['app_title']}")
+        st.caption(f"ログイン中: {ROLE_LABEL.get(role, '')}")
     with head_r:
         if st.button("🔄 更新", use_container_width=True):
             load_state.clear()
@@ -966,13 +1001,9 @@ if check_password():
     mix_done, mix_total = league_progress(state, "mix")
     league_complete = (reg_done == reg_total and mix_done == mix_total)
 
-    # ★閲覧者はタブ2つ（スマホで確実に収まり、描画も軽い）
-    if is_admin:
-        tab_names = ["📊 順位表", "📝 リーグ入力", "🏆 決勝入力", "🌲 対戦表"]
-        tab1, tab2, tab3, tab4 = st.tabs(tab_names)
-    else:
-        tab1, tab4 = st.tabs(["📊 順位表", "🌲 対戦表"])
-        tab2 = tab3 = None
+    # ★タブは全員4つ（閲覧者も見られる。ただし編集はできない）
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["📊 順位表", "📝 リーグ戦", "🏆 決勝戦", "🌲 対戦表"])
 
     with tab1:
         if league_complete:
@@ -995,31 +1026,34 @@ if check_password():
                   .format(precision=0),
             hide_index=True, column_config=cfg, use_container_width=True)
 
-    if is_admin:
-        with tab2:
-            league_tab(state, True)
+    with tab2:
+        if not can_edit:
+            st.caption("閲覧モードです（編集はできません）")
+        league_tab(state, can_edit)
 
-        with tab3:
-            _, league_end, tourn_start = schedule_times(state)
-            st.info(f"🏆 トーナメント開始: {tourn_start.strftime('%H:%M')} "
-                    f"(リーグ終了 {league_end.strftime('%H:%M')} + "
-                    f"{state['interval_duration']}分後)")
-            if not league_complete:
-                st.warning(
-                    f"⚠️ リーグ戦がまだ全部入力されていません"
-                    f"（ガチ {reg_done}/{reg_total}・MIX {mix_done}/{mix_total}）。"
-                    "順位が未確定のため、この画面の組み合わせは変わる可能性があります。")
-            sched = (TOURN_SCHED_4COURT if state['court_mode'] == "4面"
-                     else TOURN_SCHED_3COURT)
-            for idx_slot, slot in enumerate(sched):
-                t_str = (tourn_start + timedelta(
-                    minutes=idx_slot * state['tourn_duration'])).strftime('%H:%M')
-                st.markdown(f"#### ⏰ {t_str} - {slot['cup_display']}")
-                cols = st.columns(len(slot['games']))
-                for idx_game, game in enumerate(slot['games']):
-                    with cols[idx_game]:
-                        tourn_card(state, game, True)
-                st.divider()
+    with tab3:
+        _, league_end, tourn_start = schedule_times(state)
+        st.info(f"🏆 トーナメント開始: {tourn_start.strftime('%H:%M')} "
+                f"(リーグ終了 {league_end.strftime('%H:%M')} + "
+                f"{state['interval_duration']}分後)")
+        if not can_edit:
+            st.caption("閲覧モードです（編集はできません）")
+        elif not league_complete:
+            st.warning(
+                f"⚠️ リーグ戦がまだ全部入力されていません"
+                f"（ガチ {reg_done}/{reg_total}・MIX {mix_done}/{mix_total}）。"
+                "順位が未確定のため、この画面の組み合わせは変わる可能性があります。")
+        sched = (TOURN_SCHED_4COURT if state['court_mode'] == "4面"
+                 else TOURN_SCHED_3COURT)
+        for idx_slot, slot in enumerate(sched):
+            t_str = (tourn_start + timedelta(
+                minutes=idx_slot * state['tourn_duration'])).strftime('%H:%M')
+            st.markdown(f"#### ⏰ {t_str} - {slot['cup_display']}")
+            cols = st.columns(len(slot['games']))
+            for idx_game, game in enumerate(slot['games']):
+                with cols[idx_game]:
+                    tourn_card(state, game, can_edit)
+            st.divider()
 
     with tab4:
         st.header("決勝トーナメント表")
