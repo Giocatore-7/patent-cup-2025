@@ -1,11 +1,9 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import graphviz
 import json
 import time
-import random
-# --- 追加ライブラリ（DB用） ---
+import html
 from sqlalchemy import text
 
 # ==========================================
@@ -13,7 +11,6 @@ from sqlalchemy import text
 # ==========================================
 st.set_page_config(page_title="パテントカップ大会アプリ", layout="wide")
 
-# パスワード管理
 try:
     ADMIN_PASS = st.secrets["ADMIN_PASS"]
     VIEW_PASS = st.secrets["VIEW_PASS"]
@@ -22,23 +19,45 @@ except (FileNotFoundError, KeyError):
     st.error("⛔ セキュリティエラー: パスワード設定が見つかりません。")
     st.stop()
 
-# CSS設定
+# CSS設定（★スマホでタブ4つが収まるように圧縮）
 st.markdown("""
     <style>
     [data-testid="stToolbar"] { display: none !important; }
     .stAppDeployButton { display: none !important; }
     footer { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
+
+    /* タブを折り返さず、はみ出さないよう圧縮する */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px !important;
+        overflow-x: visible !important;
+        flex-wrap: nowrap !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        padding: 6px 8px !important;
+        font-size: 13px !important;
+        white-space: nowrap !important;
+        min-width: 0 !important;
+    }
+    /* baseweb がタブ数過多のときに出す左右スクロールボタンを隠す */
+    .stTabs [data-baseweb="tab-list"] > button[aria-label] { display: none !important; }
+
+    @media (max-width: 520px) {
+        .stTabs [data-baseweb="tab-list"] { gap: 1px !important; }
+        .stTabs [data-baseweb="tab"] {
+            padding: 5px 3px !important;
+            font-size: 11px !important;
+        }
+        .block-container { padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# チーム名初期値
-DEFAULT_TEAMS_REGULAR = {chr(65+i): f"チーム{chr(65+i)}" for i in range(12)}
-DEFAULT_TEAMS_MIX = {chr(65+i): f"MIXチーム{chr(65+i)}" for i in range(12)}
+DEFAULT_TEAMS_REGULAR = {chr(65 + i): f"チーム{chr(65+i)}" for i in range(12)}
+DEFAULT_TEAMS_MIX = {chr(65 + i): f"MIXチーム{chr(65+i)}" for i in range(12)}
 
-# スケジュール定義 (Google版と同じなので省略せずにそのまま)
 SCHEDULE_TEMPLATE_4COURT = [
-    [("A", "E"), ("B", "F"), ("A", "E"), ("B", "F")], 
+    [("A", "E"), ("B", "F"), ("A", "E"), ("B", "F")],
     [("C", "G"), ("D", "H"), ("C", "G"), ("D", "H")],
     [("I", "J"), ("K", "L"), ("I", "J"), ("K", "L")],
     [("A", "B"), ("C", "D"), ("A", "B"), ("C", "D")],
@@ -48,7 +67,6 @@ SCHEDULE_TEMPLATE_4COURT = [
     [("E", "I"), ("F", "J"), ("E", "I"), ("F", "J")],
     [("G", "K"), ("H", "L"), ("G", "K"), ("H", "L")]
 ]
-
 SCHEDULE_TEMPLATE_3COURT = [
     {"id": 1, "matches": [("reg", "A", "E"), ("reg", "B", "F"), ("mix", "A", "E")]},
     {"id": 2, "matches": [("reg", "C", "G"), ("mix", "B", "F"), ("mix", "C", "G")]},
@@ -102,7 +120,6 @@ TOURN_SCHED_4COURT = [
         {"league": "mix", "cup": "Champions", "round": "3rd", "court": "D"},
     ]},
 ]
-
 TOURN_SCHED_3COURT = [
     {"cup_display": "クラシカルSF", "games": [
         {"league": "reg", "cup": "Classical", "round": "SF1", "court": "A"},
@@ -146,16 +163,48 @@ TOURN_SCHED_3COURT = [
     ]},
 ]
 
+# カップの日本語表示名（★見出しから Champions/Elite/Classical を消すため）
+CUP_LABEL_JA = {
+    "Champions": "パテントチャンピオンズカップ",
+    "Elite": "パテントエリートカップ",
+    "Classical": "パテントクラシカルカップ",
+}
+
+SETTING_KEYS = [
+    'app_title', 'teams_reg', 'teams_mix', 'court_mode',
+    'start_time_hour', 'start_time_minute',
+    'league_duration', 'tourn_duration', 'interval_duration',
+]
+
+
 # ==========================================
-# 2. 関数定義 (PostgreSQL データベース対応版)
+# 2. データ層（PostgreSQL）
 # ==========================================
+def _default_state():
+    return {
+        'app_title': "パテントカップ2025",
+        'teams_reg': DEFAULT_TEAMS_REGULAR.copy(),
+        'teams_mix': DEFAULT_TEAMS_MIX.copy(),
+        'results': {},
+        'tourn_results': {},
+        'court_mode': "4面",
+        'start_time_hour': 13,
+        'start_time_minute': 15,
+        'league_duration': 7,
+        'tourn_duration': 10,
+        'interval_duration': 15,
+    }
+
+
+def get_conn():
+    return st.connection("postgresql", type="sql")
+
 
 @st.cache_resource
 def init_db():
-    """データベースのテーブルが存在しない場合は作成する"""
-    conn = st.connection("postgresql", type="sql")
+    """テーブルが無ければ作る（プロセスにつき1回）"""
+    conn = get_conn()
     with conn.session as s:
-        # patent_cup_logs という名前のテーブルを作成（追記ログ用）
         s.execute(text("""
             CREATE TABLE IF NOT EXISTS patent_cup_logs (
                 id SERIAL PRIMARY KEY,
@@ -165,597 +214,820 @@ def init_db():
             );
         """))
         s.commit()
+    return True
 
-@st.cache_data(ttl=30)
-def load_data_from_db():
-    """
-    【追記型 DB版】
-    DBからログを全件読み込み、最新状態を復元する。
-    """
-    conn = st.connection("postgresql", type="sql")
-    # ログを古い順に全て取得
-    df = conn.query("SELECT log_type, log_data FROM patent_cup_logs ORDER BY id ASC", ttl=0)
-    
-    if df.empty: return None
 
-    current_data = {}
-    
-    for _, row in df.iterrows():
-        l_type = row['log_type']
-        l_data = row['log_data']
-        
-        # JSONが文字列として返ってきた場合の処理
-        if isinstance(l_data, str):
-            l_data = json.loads(l_data)
-            
-        if l_type == 'init':
-            current_data = l_data
-        elif l_type == 'match' and current_data:
-            m_key = l_data.get('k')
-            res = l_data.get('v')
-            is_tourn = l_data.get('t')
-            
-            if is_tourn:
-                current_data['tourn_results'][m_key] = res
-            else:
-                current_data['results'][m_key] = res
-                
-    return current_data if current_data else None
+def _as_dict(v):
+    return json.loads(v) if isinstance(v, str) else v
 
-def save_data_to_db():
+
+def _replay(rows):
     """
-    【管理者用 DB版】
-    現在の最新状態をスナップショットとして保存し、ログを綺麗にする。
+    ログを再生して最新状態を作る。
+    ★修正: init行が無くても match行を取りこぼさない（デフォルト状態から積む）。
     """
-    data = {
-        'app_title': st.session_state.app_title,
-        'teams_reg': st.session_state.teams_reg,
-        'teams_mix': st.session_state.teams_mix,
-        'results': st.session_state.results,
-        'tourn_results': st.session_state.tourn_results,
-        'court_mode': st.session_state.court_mode,
-        'start_time_hour': st.session_state.start_time_hour,
-        'start_time_minute': st.session_state.start_time_minute,
-        'league_duration': st.session_state.league_duration,
-        'tourn_duration': st.session_state.tourn_duration,
-        'interval_duration': st.session_state.interval_duration
-    }
-    
+    data = _default_state()
+    for log_type, log_data in rows:
+        d = _as_dict(log_data)
+        if d is None:
+            continue
+        if log_type == 'init':
+            merged = _default_state()
+            merged.update(d)
+            merged.setdefault('results', {})
+            merged.setdefault('tourn_results', {})
+            data = merged
+        elif log_type == 'match':
+            key, val, is_tourn = d.get('k'), d.get('v'), d.get('t')
+            if not key:
+                continue
+            bucket = data['tourn_results'] if is_tourn else data['results']
+            bucket[key] = val
+    return data
+
+
+@st.cache_data(ttl=5, show_spinner=False)
+def load_state():
+    """
+    ★修正: 毎回DBから最新状態を読む（全セッション共有キャッシュ・5秒）。
+    これにより管理者どうし／閲覧者の見えているデータが常に一致する。
+    """
+    conn = get_conn()
+    df = conn.query(
+        "SELECT log_type, log_data FROM patent_cup_logs ORDER BY id ASC", ttl=0)
+    rows = [(r['log_type'], r['log_data']) for _, r in df.iterrows()]
+    return _replay(rows)
+
+
+def save_match(match_key, result_dict, is_tournament=False):
+    """試合結果を1行 INSERT する（追記のみ。競合しない）"""
     try:
-        conn = st.connection("postgresql", type="sql")
+        payload = {'k': match_key, 'v': result_dict, 't': bool(is_tournament)}
+        conn = get_conn()
         with conn.session as s:
-            # 古いログを全削除して、新しい初期データとして登録
+            s.execute(
+                text("INSERT INTO patent_cup_logs (log_type, log_data) "
+                     "VALUES (:type, CAST(:data AS JSONB));"),
+                {"type": "match", "data": json.dumps(payload, ensure_ascii=False)}
+            )
+            s.commit()
+        load_state.clear()
+        st.toast("✅ 試合結果を記録しました")
+        return True
+    except Exception as e:
+        st.error(f"保存エラー: {e}")
+        return False
+
+
+def save_settings(changes):
+    """
+    ★修正: 設定保存で他人のスコアを消さない。
+    テーブルをロックし、DBから最新を読み直して設定項目だけ差し替えてから
+    スナップショットを書く。results / tourn_results は必ずDB側の最新を使う。
+    """
+    try:
+        conn = get_conn()
+        with conn.session as s:
+            s.execute(text("LOCK TABLE patent_cup_logs IN EXCLUSIVE MODE;"))
+            rows = s.execute(
+                text("SELECT log_type, log_data FROM patent_cup_logs ORDER BY id ASC")
+            ).fetchall()
+            latest = _replay([(r[0], r[1]) for r in rows])
+            for k, v in changes.items():
+                if k in SETTING_KEYS:
+                    latest[k] = v
             s.execute(text("DELETE FROM patent_cup_logs;"))
             s.execute(
-                text("INSERT INTO patent_cup_logs (log_type, log_data) VALUES (:type, CAST(:data AS JSONB));"),
-                {"type": "init", "data": json.dumps(data, ensure_ascii=False)}
+                text("INSERT INTO patent_cup_logs (log_type, log_data) "
+                     "VALUES ('init', CAST(:data AS JSONB));"),
+                {"data": json.dumps(latest, ensure_ascii=False)}
             )
             s.commit()
-            
-        load_data_from_db.clear()
-        st.toast("✅ 設定を保存し、データベースを最適化しました")
+        load_state.clear()
+        st.toast("✅ 設定を保存しました（試合結果は保持されています）")
+        return True
     except Exception as e:
         st.error(f"保存エラー: {e}")
+        return False
 
-def save_specific_match(match_key, new_result_dict, is_tournament=False):
-    """
-    【追記型 DB版】
-    試合結果を新しい行としてDBにINSERTする。排他制御により絶対に競合しない。
-    """
+
+def reset_all():
     try:
-        log_data = {
-            'k': match_key,
-            'v': new_result_dict,
-            't': is_tournament
-        }
-        
-        conn = st.connection("postgresql", type="sql")
+        conn = get_conn()
         with conn.session as s:
-            # 追記するだけ！超高速で安全
+            s.execute(text("LOCK TABLE patent_cup_logs IN EXCLUSIVE MODE;"))
+            s.execute(text("DELETE FROM patent_cup_logs;"))
             s.execute(
-                text("INSERT INTO patent_cup_logs (log_type, log_data) VALUES (:type, CAST(:data AS JSONB));"),
-                {"type": "match", "data": json.dumps(log_data, ensure_ascii=False)}
+                text("INSERT INTO patent_cup_logs (log_type, log_data) "
+                     "VALUES ('init', CAST(:data AS JSONB));"),
+                {"data": json.dumps(_default_state(), ensure_ascii=False)}
             )
             s.commit()
-
-        # 手元の画面も即座に更新
-        if is_tournament:
-            st.session_state.tourn_results[match_key] = new_result_dict
-        else:
-            st.session_state.results[match_key] = new_result_dict
-            
-        load_data_from_db.clear()
-        st.toast(f"✅ 試合結果を記録しました")
-        
+        load_state.clear()
+        return True
     except Exception as e:
-        st.error(f"保存エラー: {e}")
+        st.error(f"初期化エラー: {e}")
+        return False
+
 
 # ==========================================
-# セッション初期化・その他の関数はそのまま
+# 3. ロジック
 # ==========================================
+def valid_league_keys(court_mode):
+    """
+    ★修正: 現在のコート数で実際に存在する試合キーだけを有効にする。
+    4面⇔3面を切り替えても、古いキーが順位表に混ざらない。
+    """
+    keys = set()
+    if court_mode == "4面":
+        for i, slot in enumerate(SCHEDULE_TEMPLATE_4COURT):
+            for j, (h, a) in enumerate(slot):
+                lt = "reg" if j < 2 else "mix"
+                keys.add(f"{lt}_{i}_{h}_{a}")
+    else:
+        for i, slot in enumerate(SCHEDULE_TEMPLATE_3COURT):
+            for lt, h, a in slot["matches"]:
+                keys.add(f"{lt}_{i}_{h}_{a}")
+    return keys
 
-def init_session_state():
-    # ★追加: アプリ起動時にデータベースのテーブルを準備する
-    init_db()
-    
-    if 'initialized' not in st.session_state:
-        saved_data = load_data_from_db() # ★変更
-        
-        st.session_state.auth_status = None
-        st.session_state.edit_mode_title = False
-        st.session_state.edit_mode_court = False
-        st.session_state.edit_mode_settings = False
-        st.session_state.edit_mode_teams = False
-        st.session_state.editing_match_id = None
 
-        if saved_data:
-            st.session_state.app_title = saved_data.get('app_title', "パテントカップ2025")
-            st.session_state.teams_reg = saved_data.get('teams_reg', DEFAULT_TEAMS_REGULAR.copy())
-            st.session_state.teams_mix = saved_data.get('teams_mix', DEFAULT_TEAMS_MIX.copy())
-            st.session_state.results = saved_data.get('results', {})
-            st.session_state.tourn_results = saved_data.get('tourn_results', {})
-            st.session_state.court_mode = saved_data.get('court_mode', "4面")
-            st.session_state.start_time_hour = saved_data.get('start_time_hour', 13)
-            st.session_state.start_time_minute = saved_data.get('start_time_minute', 15)
-            st.session_state.league_duration = saved_data.get('league_duration', 7)
-            st.session_state.tourn_duration = saved_data.get('tourn_duration', 10)
-            st.session_state.interval_duration = saved_data.get('interval_duration', 15)
+def calculate_standings(state, league_type):
+    teams_map = state['teams_reg'] if league_type == "reg" else state['teams_mix']
+    allowed = valid_league_keys(state['court_mode'])
+    rows = []
+    for code, name in teams_map.items():
+        st_ = {"チーム名": name, "勝点": 0, "試合数": 0, "勝": 0, "引": 0, "負": 0,
+               "得点": 0, "失点": 0, "得失差": 0, "SortIndex": ord(code) - 65}
+        for key, res in state['results'].items():
+            if key not in allowed:
+                continue
+            if not key.startswith(f"{league_type}_"):
+                continue
+            parts = key.split("_")
+            if len(parts) < 4:
+                continue
+            home_code, away_code = parts[2], parts[3]
+            if res is None or res.get('s1') is None or res.get('s2') is None:
+                continue
+            s1, s2 = res['s1'], res['s2']
+            if code == home_code:
+                mine, theirs = s1, s2
+            elif code == away_code:
+                mine, theirs = s2, s1
+            else:
+                continue
+            st_["試合数"] += 1
+            st_["得点"] += mine
+            st_["失点"] += theirs
+            st_["得失差"] += mine - theirs
+            if mine > theirs:
+                st_["勝点"] += 3
+                st_["勝"] += 1
+            elif mine == theirs:
+                st_["勝点"] += 1
+                st_["引"] += 1
+            else:
+                st_["負"] += 1
+        rows.append(st_)
+    df = pd.DataFrame(rows).sort_values(
+        by=["勝点", "得失差", "得点", "SortIndex"], ascending=[False, False, False, True])
+    df = df.drop(columns=["SortIndex"])
+    df.insert(0, "順位", range(1, len(df) + 1))
+    return df
+
+
+def league_progress(state, league_type):
+    """入力済み試合数 / 全試合数"""
+    allowed = {k for k in valid_league_keys(state['court_mode'])
+               if k.startswith(f"{league_type}_")}
+    done = sum(1 for k in allowed
+               if state['results'].get(k) and state['results'][k].get('s1') is not None)
+    return done, len(allowed)
+
+
+def get_cup_ranks(cup_name):
+    return {"Champions": 0, "Elite": 4, "Classical": 8}.get(cup_name, 0)
+
+
+def match_result(state, match_id):
+    """(結果dict, 勝者) を返す。勝者は 'left' / 'right' / None"""
+    res = state['tourn_results'].get(
+        match_id, {'s1': None, 's2': None, 'pk1': None, 'pk2': None})
+    s1, s2 = res.get('s1'), res.get('s2')
+    winner = None
+    if s1 is not None and s2 is not None:
+        if s1 > s2:
+            winner = "left"
+        elif s2 > s1:
+            winner = "right"
         else:
-            if 'app_title' not in st.session_state: st.session_state.app_title = "パテントカップ2025"
-            if 'teams_reg' not in st.session_state: st.session_state.teams_reg = DEFAULT_TEAMS_REGULAR.copy()
-            if 'teams_mix' not in st.session_state: st.session_state.teams_mix = DEFAULT_TEAMS_MIX.copy()
-            if 'results' not in st.session_state: st.session_state.results = {} 
-            if 'tourn_results' not in st.session_state: st.session_state.tourn_results = {}
-            if 'court_mode' not in st.session_state: st.session_state.court_mode = "4面"
-            if 'start_time_hour' not in st.session_state: st.session_state.start_time_hour = 13
-            if 'start_time_minute' not in st.session_state: st.session_state.start_time_minute = 15
-            if 'league_duration' not in st.session_state: st.session_state.league_duration = 7
-            if 'tourn_duration' not in st.session_state: st.session_state.tourn_duration = 10
-            if 'interval_duration' not in st.session_state: st.session_state.interval_duration = 15
-        
-        st.session_state.initialized = True
+            pk1, pk2 = res.get('pk1'), res.get('pk2')
+            if pk1 is not None and pk2 is not None:
+                if pk1 > pk2:
+                    winner = "left"
+                elif pk2 > pk1:
+                    winner = "right"
+    return res, winner
 
-    query_params = st.query_params
-    if st.session_state.auth_status is None:
-        role = query_params.get("role")
-        if role == "player":
-            st.session_state.auth_status = "view"
-        elif role == "admin_secret":
-            st.session_state.auth_status = "admin"
+
+def cup_teams(state, league, cup):
+    """そのカップの 1〜4位（=SFの4チーム）"""
+    ranks = calculate_standings(state, league)["チーム名"].tolist()
+    if len(ranks) < 12:
+        return None
+    i = get_cup_ranks(cup)
+    return ranks[i], ranks[i + 1], ranks[i + 2], ranks[i + 3]
+
+
+def resolve_slot(state, league, cup, slot):
+    """
+    slot: SF1 / SF1_Opp / SF2 / SF2_Opp / Final / Final_Opp / 3rd / 3rd_Opp
+    """
+    teams = cup_teams(state, league, cup)
+    if teams is None:
+        return None
+    t1, t2, t3, t4 = teams
+    if slot == "SF1":
+        return t1
+    if slot == "SF1_Opp":
+        return t4
+    if slot == "SF2":
+        return t2
+    if slot == "SF2_Opp":
+        return t3
+
+    _, w1 = match_result(state, f"{league}_{cup}_SF1")
+    _, w2 = match_result(state, f"{league}_{cup}_SF2")
+    win1 = t1 if w1 == "left" else (t4 if w1 == "right" else None)
+    lose1 = t4 if w1 == "left" else (t1 if w1 == "right" else None)
+    win2 = t2 if w2 == "left" else (t3 if w2 == "right" else None)
+    lose2 = t3 if w2 == "left" else (t2 if w2 == "right" else None)
+
+    return {"Final": win1, "Final_Opp": win2,
+            "3rd": lose1, "3rd_Opp": lose2}.get(slot)
+
+
+def schedule_times(state):
+    """リーグ終了時刻とトーナメント開始時刻を、タブの外で計算する"""
+    base = datetime(2025, 1, 1, state['start_time_hour'], state['start_time_minute'])
+    n_slots = 9 if state['court_mode'] == "4面" else 12
+    league_end = base + timedelta(minutes=n_slots * state['league_duration'])
+    tourn_start = league_end + timedelta(minutes=state['interval_duration'])
+    return base, league_end, tourn_start
+
+
+# ==========================================
+# 4. トーナメント表（SVG）
+# ==========================================
+def _score_labels(res):
+    """(左スコア表示, 右スコア表示)。PKがあれば 2(5) の形式。"""
+    if not res or res.get('s1') is None or res.get('s2') is None:
+        return "", ""
+    s1, s2 = res['s1'], res['s2']
+    pk1, pk2 = res.get('pk1'), res.get('pk2')
+    if s1 == s2 and pk1 is not None and pk2 is not None:
+        return f"{s1}({pk1})", f"{s2}({pk2})"
+    return str(s1), str(s2)
+
+
+def _clip(s, n=8):
+    if s is None:
+        return ""
+    s = str(s)
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _box(x, y, w, h, name, score, rank=None, win=False, fill="#ffffff"):
+    """SVGの1チーム枠"""
+    stroke = "#d32f2f" if win else "#8a8a8a"
+    sw = 2 if win else 1
+    weight = "600" if win else "400"
+    parts = [
+        f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="5" '
+        f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>'
+    ]
+    tx = x + 7
+    if rank is not None:
+        parts.append(
+            f'<text x="{x+7}" y="{y+h/2+4}" font-size="10" fill="#777">{rank}位</text>')
+        tx = x + 28
+    parts.append(
+        f'<text x="{tx}" y="{y+h/2+4}" font-size="12" font-weight="{weight}" '
+        f'fill="#1a1a1a">{html.escape(_clip(name))}</text>')
+    if score:
+        parts.append(
+            f'<text x="{x+w-7}" y="{y+h/2+4}" font-size="13" font-weight="700" '
+            f'text-anchor="end" fill="#1a1a1a">{html.escape(score)}</text>')
+    return "".join(parts)
+
+
+def _link(x_from, x_to, y1, y2, win):
+    """2つの枠から次の枠へ伸びる接続線。win は 'top'/'bottom'/None"""
+    xm = (x_from + x_to) / 2
+    ym = (y1 + y2) / 2
+    c_top = "#d32f2f" if win == "top" else "#b0b0b0"
+    c_bot = "#d32f2f" if win == "bottom" else "#b0b0b0"
+    c_out = "#d32f2f" if win else "#b0b0b0"
+    w_top = 2 if win == "top" else 1
+    w_bot = 2 if win == "bottom" else 1
+    return (
+        f'<path d="M{x_from} {y1} H{xm}" stroke="{c_top}" stroke-width="{w_top}" fill="none"/>'
+        f'<path d="M{x_from} {y2} H{xm}" stroke="{c_bot}" stroke-width="{w_bot}" fill="none"/>'
+        f'<path d="M{xm} {y1} V{y2}" stroke="#b0b0b0" stroke-width="1" fill="none"/>'
+        f'<path d="M{xm} {ym} H{x_to}" stroke="{c_out}" stroke-width="{2 if win else 1}" fill="none"/>'
+    )
+
+
+def bracket_svg(state, league, cup):
+    """スコア入りのトーナメント表をSVGで描く"""
+    teams = cup_teams(state, league, cup)
+    if teams is None:
+        return None
+    t1, t2, t3, t4 = teams
+    i = get_cup_ranks(cup)
+    r1, r2, r3, r4 = i + 1, i + 2, i + 3, i + 4
+
+    sf1, w_sf1 = match_result(state, f"{league}_{cup}_SF1")
+    sf2, w_sf2 = match_result(state, f"{league}_{cup}_SF2")
+    fin, w_fin = match_result(state, f"{league}_{cup}_Final")
+    trd, w_trd = match_result(state, f"{league}_{cup}_3rd")
+
+    a1, a2 = _score_labels(sf1)
+    b1, b2 = _score_labels(sf2)
+    f1, f2 = _score_labels(fin)
+    d1, d2 = _score_labels(trd)
+
+    fin_l = t1 if w_sf1 == "left" else (t4 if w_sf1 == "right" else "SF1勝者")
+    fin_r = t2 if w_sf2 == "left" else (t3 if w_sf2 == "right" else "SF2勝者")
+    trd_l = t4 if w_sf1 == "left" else (t1 if w_sf1 == "right" else "SF1敗者")
+    trd_r = t3 if w_sf2 == "left" else (t2 if w_sf2 == "right" else "SF2敗者")
+    champ = fin_l if w_fin == "left" else (fin_r if w_fin == "right" else "優勝")
+    third = trd_l if w_trd == "left" else (trd_r if w_trd == "right" else "3位")
+
+    X1, W1 = 4, 150
+    X2, W2 = 170, 130
+    X3, W3 = 316, 104
+    H = 30
+    W_TOTAL, H_TOTAL = 428, 300
+
+    bg = "#FFF4F8" if league == "mix" else "#EFF6FF"
+    p = [f'<svg viewBox="0 0 {W_TOTAL} {H_TOTAL}" xmlns="http://www.w3.org/2000/svg" '
+         f'style="width:100%;max-width:520px;height:auto;display:block">',
+         f'<rect x="0" y="0" width="{W_TOTAL}" height="{H_TOTAL}" rx="8" fill="{bg}"/>',
+         f'<text x="{X1+4}" y="14" font-size="11" font-weight="700" fill="#555">準決勝</text>',
+         f'<text x="{X2+4}" y="14" font-size="11" font-weight="700" fill="#555">決勝</text>']
+
+    # --- 本戦 ---
+    y_a1, y_a2 = 22, 60
+    y_b1, y_b2 = 130, 168
+    y_f1 = (y_a1 + y_a2) / 2
+    y_f2 = (y_b1 + y_b2) / 2
+    y_ch = (y_f1 + y_f2) / 2
+
+    p.append(_link(X1 + W1, X2, y_a1 + H / 2, y_a2 + H / 2,
+                   "top" if w_sf1 == "left" else ("bottom" if w_sf1 == "right" else None)))
+    p.append(_link(X1 + W1, X2, y_b1 + H / 2, y_b2 + H / 2,
+                   "top" if w_sf2 == "left" else ("bottom" if w_sf2 == "right" else None)))
+    p.append(_link(X2 + W2, X3, y_f1 + H / 2, y_f2 + H / 2,
+                   "top" if w_fin == "left" else ("bottom" if w_fin == "right" else None)))
+
+    p.append(_box(X1, y_a1, W1, H, t1, a1, r1, w_sf1 == "left"))
+    p.append(_box(X1, y_a2, W1, H, t4, a2, r4, w_sf1 == "right"))
+    p.append(_box(X1, y_b1, W1, H, t2, b1, r2, w_sf2 == "left"))
+    p.append(_box(X1, y_b2, W1, H, t3, b2, r3, w_sf2 == "right"))
+    p.append(_box(X2, y_f1, W2, H, fin_l, f1, None, w_fin == "left", "#FFFFFF"))
+    p.append(_box(X2, y_f2, W2, H, fin_r, f2, None, w_fin == "right", "#FFFFFF"))
+    p.append(_box(X3, y_ch, W3, H + 6, champ, "", None, w_fin is not None, "#FFD86B"))
+
+    # --- 3位決定戦 ---
+    y_d1, y_d2 = 218, 256
+    y_th = (y_d1 + y_d2) / 2
+    p.append(f'<text x="{X1+4}" y="210" font-size="11" font-weight="700" '
+             f'fill="#555">3位決定戦</text>')
+    p.append(_link(X1 + W1, X2, y_d1 + H / 2, y_d2 + H / 2,
+                   "top" if w_trd == "left" else ("bottom" if w_trd == "right" else None)))
+    p.append(_box(X1, y_d1, W1, H, trd_l, d1, None, w_trd == "left", "#F7FAFF"))
+    p.append(_box(X1, y_d2, W1, H, trd_r, d2, None, w_trd == "right", "#F7FAFF"))
+    p.append(_box(X2, y_th, W2, H, third, "", None, w_trd is not None, "#FFF6C2"))
+
+    p.append('</svg>')
+    return "".join(p)
+
+
+def render_bracket(state, league, cup):
+    """★見出しから Champions/Elite/Classical を除去。MIXは残す。"""
+    label = CUP_LABEL_JA[cup] + ("MIX" if league == "mix" else "")
+    icon = "🟧" if league == "mix" else "🟦"
+    st.markdown(f"##### {icon} {label}")
+    svg = bracket_svg(state, league, cup)
+    if svg is None:
+        st.caption("順位確定後に表示されます")
+    else:
+        st.markdown(svg, unsafe_allow_html=True)
+
+
+# ==========================================
+# 5. 認証
+# ==========================================
+def init_session():
+    init_db()
+    ss = st.session_state
+    ss.setdefault('auth_status', None)
+    ss.setdefault('edit_mode_title', False)
+    ss.setdefault('edit_mode_court', False)
+    ss.setdefault('edit_mode_settings', False)
+    ss.setdefault('edit_mode_teams', False)
+    ss.setdefault('editing_match_id', None)
+
+    # ★修正: 管理者ロールはURLに載せない（URLを共有すると管理者権限が漏れるため）。
+    #        閲覧者ロールのみ、再ログインの手間を省くためURLに残す。
+    if ss.auth_status is None and st.query_params.get("role") == "player":
+        ss.auth_status = "view"
+
 
 def check_password():
-    if st.session_state.auth_status is not None:
+    ss = st.session_state
+    if ss.auth_status is not None:
         return True
     st.markdown("## 🔐 ログイン")
-    st.caption("一度ログインすると、次回からは自動で表示されます。")
+    st.caption("閲覧用パスワードは一度入力すると次回から自動で表示されます。")
     password = st.text_input("パスワードを入力", type="password")
-    
     if st.button("ログイン"):
         if password == ADMIN_PASS:
-            st.session_state.auth_status = "admin"
-            st.query_params["role"] = "admin_secret"
+            ss.auth_status = "admin"
+            st.query_params.clear()
             st.rerun()
         elif password == VIEW_PASS:
-            st.session_state.auth_status = "view"
+            ss.auth_status = "view"
             st.query_params["role"] = "player"
             st.rerun()
         else:
             st.error("パスワードが違います")
     return False
 
-def get_team_name(league, code):
-    if league == "reg": return st.session_state.teams_reg.get(code, code)
-    else: return st.session_state.teams_mix.get(code, code)
 
-def calculate_standings(league_type):
-    teams_map = st.session_state.teams_reg if league_type == "reg" else st.session_state.teams_mix
-    data = []
-    for code, name in teams_map.items():
-        stats = {"チーム名": name, "Code": code, "勝点": 0, "試合数": 0, "勝": 0, "引": 0, "負": 0, "得点": 0, "失点": 0, "得失差": 0}
-        stats["SortIndex"] = ord(code) - 65
-        for key, res in st.session_state.results.items():
-            if not key.startswith(f"{league_type}_"): continue
-            parts = key.split("_")
-            if len(parts) < 4: continue
-            home_code, away_code = parts[2], parts[3]
-            if res['s1'] is not None and res['s2'] is not None:
-                s1, s2 = res['s1'], res['s2']
-                if code == home_code:
-                    stats["試合数"]+=1; stats["得点"]+=s1; stats["失点"]+=s2; stats["得失差"]+=(s1-s2)
-                    if s1>s2: stats["勝点"]+=3; stats["勝"]+=1
-                    elif s1==s2: stats["勝点"]+=1; stats["引"]+=1
-                    else: stats["負"]+=1
-                elif code == away_code:
-                    stats["試合数"]+=1; stats["得点"]+=s2; stats["失点"]+=s1; stats["得失差"]+=(s2-s1)
-                    if s2>s1: stats["勝点"]+=3; stats["勝"]+=1
-                    elif s2==s1: stats["勝点"]+=1; stats["引"]+=1
-                    else: stats["負"]+=1
-        data.append(stats)
-    df = pd.DataFrame(data)
-    df = df.sort_values(by=["勝点", "得失差", "得点", "SortIndex"], ascending=[False, False, False, True])
-    df.insert(0, "順位", range(1, len(df) + 1))
-    return df
+# ==========================================
+# 6. 画面
+# ==========================================
+def admin_panel(state):
+    ss = st.session_state
+    with st.expander("⚙️ 管理者設定 (設定・リセット)", expanded=False):
+        st.caption("※ 設定を保存しても、入力済みの試合結果は消えません。")
 
-def get_cup_ranks(cup_name):
-    if cup_name == "Champions": return 0
-    if cup_name == "Elite": return 4
-    if cup_name == "Classical": return 8
-    return 0
-
-def get_tourn_match_result(match_id):
-    res = st.session_state.tourn_results.get(match_id, {'s1': None, 's2': None, 'pk1': None, 'pk2': None})
-    winner, loser = None, None
-    s1, s2 = res['s1'], res['s2']
-    if s1 is not None and s2 is not None:
-        if s1 > s2: winner, loser = "left", "right"
-        elif s2 > s1: winner, loser = "right", "left"
+        st.markdown("##### タイトル設定")
+        if not ss.edit_mode_title:
+            st.info(state['app_title'])
+            if st.button("編集", key="btn_ti"):
+                ss.edit_mode_title = True
+                st.rerun()
         else:
-            pk1, pk2 = res.get('pk1'), res.get('pk2')
-            if pk1 is not None and pk2 is not None:
-                if pk1 > pk2: winner, loser = "left", "right"
-                elif pk2 > pk1: winner, loser = "right", "left"
-    return res, winner, loser
-
-def resolve_tournament_team(league, cup, round_name, ranks_list, match_id_prefix):
-    start_idx = get_cup_ranks(cup)
-    if len(ranks_list) < 12: return None
-    t1, t4 = ranks_list[start_idx], ranks_list[start_idx+3]
-    t2, t3 = ranks_list[start_idx+1], ranks_list[start_idx+2]
-    
-    if round_name == "SF1": return t1
-    if round_name == "SF1_Opp": return t4
-    if round_name == "SF2": return t2
-    if round_name == "SF2_Opp": return t3
-
-    sf1_id = f"{league}_{cup}_SF1"; sf2_id = f"{league}_{cup}_SF2"
-    _, w1, l1 = get_tourn_match_result(sf1_id)
-    _, w2, l2 = get_tourn_match_result(sf2_id)
-    
-    win1 = t1 if w1=="left" else t4 if w1=="right" else None
-    lose1 = t1 if w1=="right" else t4 if w1=="left" else None
-    win2 = t2 if w2=="left" else t3 if w2=="right" else None
-    lose2 = t2 if w2=="right" else t3 if w2=="left" else None
-
-    if round_name == "Final": return win1
-    if round_name == "Final_Opp": return win2
-    if round_name == "3rd": return lose1
-    if round_name == "3rd_Opp": return lose2
-    return None
-
-def render_match_card(league_type, title, match_id, team_l, team_r, court, is_admin):
-    res, _, _ = get_tourn_match_result(match_id)
-    header_color = "#FFF0F5" if league_type == "mix" else "#E6F3FF"
-    header_text = f"{title} @ {court}コート"
-    
-    with st.container(border=True):
-        st.markdown(f"""<div style="background-color: {header_color}; padding: 8px; border-radius: 5px; margin-bottom: 10px; font-weight: bold;">{header_text}</div>""", unsafe_allow_html=True)
-        t_l_show = team_l if team_l else "Wait"
-        t_r_show = team_r if team_r else "Wait"
-        st.write(f"**{t_l_show}** vs **{t_r_show}**")
-
-        if is_admin:
-            if st.session_state.editing_match_id == match_id:
-                c1, c2 = st.columns(2)
-                v1 = c1.number_input("左", value=res['s1'] or 0, key=f"{match_id}_s1", label_visibility="collapsed")
-                v2 = c2.number_input("右", value=res['s2'] or 0, key=f"{match_id}_s2", label_visibility="collapsed")
-                pk_v1, pk_v2 = None, None
-                if v1 == v2:
-                    st.caption("PK")
-                    cp1, cp2 = st.columns(2)
-                    pk_v1 = cp1.number_input("P左", value=res['pk1'] or 0, key=f"{match_id}_pk1")
-                    pk_v2 = cp2.number_input("P右", value=res['pk2'] or 0, key=f"{match_id}_pk2")
-                b1, b2 = st.columns(2)
-                if b1.button("保存", key=f"sv_{match_id}", type="primary"):
-                    save_specific_match(match_id, {'s1': v1, 's2': v2, 'pk1': pk_v1, 'pk2': pk_v2}, is_tournament=True)
-                    st.session_state.editing_match_id = None
+            nt = st.text_input("タイトル", state['app_title'])
+            c1, c2 = st.columns(2)
+            if c1.button("保存", key="sv_ti", type="primary"):
+                if save_settings({'app_title': nt}):
+                    ss.edit_mode_title = False
                     st.rerun()
-                if b2.button("取消", key=f"cn_{match_id}"): st.session_state.editing_match_id = None; st.rerun()
-            else:
-                if res['s1'] is not None:
-                    txt = f"{res['s1']}-{res['s2']}"
-                    if res['s1'] == res['s2']: txt += f" (PK {res['pk1']}-{res['pk2']})"
-                    st.markdown(f"### {txt}")
-                    if st.button("修正", key=f"ed_{match_id}"): st.session_state.editing_match_id = match_id; st.rerun()
-                else:
-                    if team_l and team_r:
-                        if st.button("入力", key=f"in_{match_id}"): st.session_state.editing_match_id = match_id; st.rerun()
-                    else:
-                        st.caption("対戦待ち")
+            if c2.button("取消", key="cn_ti"):
+                ss.edit_mode_title = False
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("##### コート数設定")
+        if not ss.edit_mode_court:
+            st.info(f"現在: {state['court_mode']}")
+            if st.button("編集", key="btn_ct"):
+                ss.edit_mode_court = True
+                st.rerun()
         else:
-            if res['s1'] is not None:
-                txt = f"{res['s1']}-{res['s2']}"
-                if res['s1'] == res['s2']: txt += f" (PK {res['pk1']}-{res['pk2']})"
-                st.markdown(f"### {txt}")
+            st.warning("コート数を変えると試合の組み合わせが変わります。"
+                       "入力済みの結果は集計対象から外れます。開始後は変更しないでください。")
+            nc = st.radio("選択", ["4面", "3面"],
+                          index=0 if state['court_mode'] == "4面" else 1)
+            c1, c2 = st.columns(2)
+            if c1.button("保存", key="sv_ct", type="primary"):
+                if save_settings({'court_mode': nc}):
+                    ss.edit_mode_court = False
+                    st.rerun()
+            if c2.button("取消", key="cn_ct"):
+                ss.edit_mode_court = False
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("##### 時間・スケジュール設定")
+        if not ss.edit_mode_settings:
+            st.write(f"開始 {state['start_time_hour']}:{state['start_time_minute']:02d}")
+            if st.button("編集", key="btn_tm"):
+                ss.edit_mode_settings = True
+                st.rerun()
+        else:
+            c1, c2, c3 = st.columns(3)
+            nh = c1.number_input("開始(時)", 0, 23, state['start_time_hour'])
+            nm = c2.number_input("開始(分)", 0, 59, state['start_time_minute'])
+            n_ld = c3.number_input("リーグ時間(分)", 1, 30, state['league_duration'])
+            n_iv = c1.number_input("インターバル(分)", 0, 60, state['interval_duration'])
+            n_td = c2.number_input("トーナメント時間(分)", 1, 30, state['tourn_duration'])
+            b1, b2 = st.columns(2)
+            if b1.button("保存", key="sv_tm", type="primary"):
+                ok = save_settings({
+                    'start_time_hour': int(nh), 'start_time_minute': int(nm),
+                    'league_duration': int(n_ld), 'interval_duration': int(n_iv),
+                    'tourn_duration': int(n_td)})
+                if ok:
+                    ss.edit_mode_settings = False
+                    st.rerun()
+            if b2.button("取消", key="cn_tm"):
+                ss.edit_mode_settings = False
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("##### チーム名設定")
+        if not ss.edit_mode_teams:
+            if st.button("編集", key="btn_te"):
+                ss.buf_reg = dict(state['teams_reg'])
+                ss.buf_mix = dict(state['teams_mix'])
+                ss.edit_mode_teams = True
+                st.rerun()
+        else:
+            # セッションが途中で失われた場合に備えて必ずバッファを用意する
+            if 'buf_reg' not in ss:
+                ss.buf_reg = dict(state['teams_reg'])
+            if 'buf_mix' not in ss:
+                ss.buf_mix = dict(state['teams_mix'])
+            with st.form("team_form"):
+                t1, t2 = st.tabs(["ガチ", "MIX"])
+                with t1:
+                    for c in "ABCDEFGHIJKL":
+                        ss.buf_reg[c] = st.text_input(
+                            f"ガチ {c}", ss.buf_reg.get(c, ""), key=f"tr_{c}")
+                with t2:
+                    for c in "ABCDEFGHIJKL":
+                        ss.buf_mix[c] = st.text_input(
+                            f"MIX {c}", ss.buf_mix.get(c, ""), key=f"tm_{c}")
+                submitted = st.form_submit_button("保存する", type="primary")
+            if submitted:
+                if save_settings({'teams_reg': dict(ss.buf_reg),
+                                  'teams_mix': dict(ss.buf_mix)}):
+                    ss.edit_mode_teams = False
+                    st.rerun()
+            if st.button("取消", key="cn_te"):
+                ss.edit_mode_teams = False
+                st.rerun()
+
+        st.markdown("---")
+        st.error("【危険】データの完全初期化")
+        st.caption("全ての試合結果・チーム名・設定を初期状態に戻します。")
+        confirm_pass = st.text_input("実行するにはリセット用パスワードを入力",
+                                     type="password", key="reset_pass")
+        if st.button("初期化を実行する", type="primary"):
+            if confirm_pass == RESET_PASS:
+                if reset_all():
+                    st.toast("✅ 全データを初期化しました")
+                    time.sleep(1.5)
+                    st.rerun()
+            else:
+                st.error("パスワードが違います")
+
+
+def league_tab(state, is_admin):
+    base, _, _ = schedule_times(state)
+    ss = st.session_state
+    slots = []
+    if state['court_mode'] == "4面":
+        for i, slot in enumerate(SCHEDULE_TEMPLATE_4COURT):
+            slots.append({
+                "time": base + timedelta(minutes=i * state['league_duration']),
+                "games": [
+                    {"type": "reg", "c": "A", "p": slot[0]},
+                    {"type": "reg", "c": "B", "p": slot[1]},
+                    {"type": "mix", "c": "C", "p": slot[2]},
+                    {"type": "mix", "c": "D", "p": slot[3]},
+                ]})
+    else:
+        for i, slot in enumerate(SCHEDULE_TEMPLATE_3COURT):
+            games = []
+            for idx, (lt, h, a) in enumerate(slot["matches"]):
+                games.append({"type": lt, "c": ["A", "B", "C"][idx], "p": (h, a)})
+            slots.append({
+                "time": base + timedelta(minutes=i * state['league_duration']),
+                "games": games})
+
+    for i, slot in enumerate(slots):
+        st.markdown(f"#### 第{i+1}試合帯 ({slot['time'].strftime('%H:%M')})")
+        cols = st.columns(len(slot['games']))
+        for idx, game in enumerate(slot['games']):
+            l_type, court = game['type'], game['c']
+            home, away = game['p']
+            match_key = f"{l_type}_{i}_{home}_{away}"
+            teams = state['teams_reg'] if l_type == "reg" else state['teams_mix']
+            home_name = teams.get(home, home)
+            away_name = teams.get(away, away)
+            with cols[idx]:
+                color = "#FFF0F5" if l_type == "mix" else "#E6F3FF"
+                label = f"{court}コート ({'MIX' if l_type == 'mix' else 'ガチ'})"
+                with st.container(border=True):
+                    st.markdown(
+                        f'<div style="background-color:{color};padding:8px;'
+                        f'border-radius:5px;margin-bottom:10px;font-weight:bold;">'
+                        f'{label}</div>', unsafe_allow_html=True)
+                    st.write(f"**{home_name}** vs **{away_name}**")
+                    res = state['results'].get(match_key) or {'s1': None, 's2': None}
+                    if not is_admin:
+                        st.write(f"### {res['s1']} - {res['s2']}"
+                                 if res.get('s1') is not None else "ー")
+                        continue
+                    if ss.editing_match_id == match_key:
+                        c1, c2 = st.columns(2)
+                        v1 = c1.number_input("左", min_value=0, value=res.get('s1') or 0,
+                                             key=f"{match_key}_1",
+                                             label_visibility="collapsed")
+                        v2 = c2.number_input("右", min_value=0, value=res.get('s2') or 0,
+                                             key=f"{match_key}_2",
+                                             label_visibility="collapsed")
+                        b1, b2 = st.columns(2)
+                        if b1.button("確定", key=f"sv_{match_key}", type="primary"):
+                            if save_match(match_key, {'s1': int(v1), 's2': int(v2)}, False):
+                                ss.editing_match_id = None
+                                st.rerun()
+                        if b2.button("中止", key=f"cn_{match_key}"):
+                            ss.editing_match_id = None
+                            st.rerun()
+                    elif res.get('s1') is not None:
+                        st.markdown(f"### {res['s1']} - {res['s2']}")
+                        if st.button("修正", key=f"ed_{match_key}"):
+                            ss.editing_match_id = match_key
+                            st.rerun()
+                    else:
+                        if st.button("入力", key=f"in_{match_key}"):
+                            ss.editing_match_id = match_key
+                            st.rerun()
+        st.divider()
+
+
+def tourn_card(state, game, is_admin):
+    ss = st.session_state
+    league, cup, rnd, court = game['league'], game['cup'], game['round'], game['court']
+    m_id = f"{league}_{cup}_{rnd}"
+    left = resolve_slot(state, league, cup, rnd)
+    right = resolve_slot(state, league, cup, f"{rnd}_Opp")
+    res, _ = match_result(state, m_id)
+
+    color = "#FFF0F5" if league == "mix" else "#E6F3FF"
+    label = CUP_LABEL_JA[cup] + ("MIX" if league == "mix" else "")
+    rnd_ja = {"SF1": "準決勝1", "SF2": "準決勝2", "Final": "決勝", "3rd": "3位決定戦"}[rnd]
+
+    with st.container(border=True):
+        st.markdown(
+            f'<div style="background-color:{color};padding:8px;border-radius:5px;'
+            f'margin-bottom:10px;font-weight:bold;font-size:13px;">'
+            f'{label}<br>{rnd_ja} @ {court}コート</div>', unsafe_allow_html=True)
+        st.write(f"**{left or 'Wait'}** vs **{right or 'Wait'}**")
+
+        def show_score():
+            txt = f"{res['s1']}-{res['s2']}"
+            if res['s1'] == res['s2']:
+                txt += f" (PK {res.get('pk1')}-{res.get('pk2')})"
+            st.markdown(f"### {txt}")
+
+        if not is_admin:
+            if res.get('s1') is not None:
+                show_score()
             else:
                 st.write("ー")
+            return
 
-def render_graphviz_bracket(cup_name, team_list, league, league_label):
-    st.markdown(f"#### {league_label} {cup_name}")
-    if len(team_list) < 12:
-        st.caption("順位確定後に表示されます")
-        return
-    start_idx = get_cup_ranks(cup_name)
-    prefix = f"{league}_{cup_name}"
-    t1, t2, t3, t4 = team_list[start_idx], team_list[start_idx+1], team_list[start_idx+2], team_list[start_idx+3]
-    _, w_sf1, _ = get_tourn_match_result(f"{prefix}_SF1")
-    _, w_sf2, _ = get_tourn_match_result(f"{prefix}_SF2")
-    _, w_fin, _ = get_tourn_match_result(f"{prefix}_Final")
-    _, w_3rd, _ = get_tourn_match_result(f"{prefix}_3rd")
-    
-    f1_name = t1 if w_sf1 == "left" else t4 if w_sf1 == "right" else "SF1勝者"
-    f2_name = t2 if w_sf2 == "left" else t3 if w_sf2 == "right" else "SF2勝者"
-    th1_name = t1 if w_sf1 == "right" else t4 if w_sf1 == "left" else "SF1敗者"
-    th2_name = t2 if w_sf2 == "right" else t3 if w_sf2 == "left" else "SF2敗者"
-    champ_name = f1_name if w_fin == "left" else f2_name if w_fin == "right" else "優勝"
-    third_name = th1_name if w_3rd == "left" else th2_name if w_3rd == "right" else "3位"
-    bg_color = "#FFF0F5" if league == "mix" else "#E6F3FF"
-    third_node_color = "#FFFACD" 
-    dot_code = f"""
-    digraph G {{
-        rankdir=LR; bgcolor="{bg_color}";
-        node [shape=box, style="filled,rounded", fillcolor="white", fontname="Sans-Serif", fontsize=10];
-        edge [penwidth=1.5];
-        subgraph cluster_main {{
-            label="本戦"; style=invis;
-            node [fillcolor="#E6F3FF"] T1 [label="1位: {t1}"]; T4 [label="4位: {t4}"]; T2 [label="2位: {t2}"]; T3 [label="3位: {t3}"];
-            node [fillcolor="#FFF0F5"] F1 [label="{f1_name}"]; F2 [label="{f2_name}"];
-            node [fillcolor="#FFD700"] WIN [label="{champ_name}"];
-            T1 -> F1 [color="{'red' if w_sf1=='left' else 'black'}", penwidth={'2.5' if w_sf1=='left' else '1'}];
-            T4 -> F1 [color="{'red' if w_sf1=='right' else 'black'}", penwidth={'2.5' if w_sf1=='right' else '1'}];
-            T2 -> F2 [color="{'red' if w_sf2=='left' else 'black'}", penwidth={'2.5' if w_sf2=='left' else '1'}];
-            T3 -> F2 [color="{'red' if w_sf2=='right' else 'black'}", penwidth={'2.5' if w_sf2=='right' else '1'}];
-            F1 -> WIN [color="{'red' if w_fin=='left' else 'black'}", penwidth={'2.5' if w_fin=='left' else '1'}];
-            F2 -> WIN [color="{'red' if w_fin=='right' else 'black'}", penwidth={'2.5' if w_fin=='right' else '1'}];
-        }}
-        T3 -> L1 [style=invis, weight=10];
-        subgraph cluster_3rd {{
-            label="3位決定戦"; style=filled; color="{bg_color}";
-            node [fillcolor="#F0F8FF"] L1 [label="{th1_name}"]; L2 [label="{th2_name}"];
-            node [fillcolor="{third_node_color}"] THIRD [label="{third_name}"];
-            L1 -> THIRD [color="{'red' if w_3rd=='left' else 'black'}", penwidth={'2.5' if w_3rd=='left' else '1'}];
-            L2 -> THIRD [color="{'red' if w_3rd=='right' else 'black'}", penwidth={'2.5' if w_3rd=='right' else '1'}];
-        }}
-    }}
-    """
-    st.graphviz_chart(dot_code)
+        if ss.editing_match_id == m_id:
+            c1, c2 = st.columns(2)
+            v1 = c1.number_input("左", min_value=0, value=res.get('s1') or 0,
+                                 key=f"{m_id}_s1", label_visibility="collapsed")
+            v2 = c2.number_input("右", min_value=0, value=res.get('s2') or 0,
+                                 key=f"{m_id}_s2", label_visibility="collapsed")
+            pk1 = pk2 = None
+            if v1 == v2:
+                st.caption("PK戦のスコア（引き分けのため必須・同点にはできません）")
+                p1, p2 = st.columns(2)
+                pk1 = p1.number_input("PK左", min_value=0, value=res.get('pk1') or 0,
+                                      key=f"{m_id}_pk1")
+                pk2 = p2.number_input("PK右", min_value=0, value=res.get('pk2') or 0,
+                                      key=f"{m_id}_pk2")
+            b1, b2 = st.columns(2)
+            if b1.button("保存", key=f"sv_{m_id}", type="primary"):
+                # ★修正: 引き分け＋PK同点は勝者が決まらず、次のラウンドが入力不能になる
+                if v1 == v2 and pk1 == pk2:
+                    st.error("PKのスコアが同点です。勝者が決まらないため保存できません。")
+                else:
+                    payload = {'s1': int(v1), 's2': int(v2),
+                               'pk1': None if pk1 is None else int(pk1),
+                               'pk2': None if pk2 is None else int(pk2)}
+                    if save_match(m_id, payload, True):
+                        ss.editing_match_id = None
+                        st.rerun()
+            if b2.button("取消", key=f"cn_{m_id}"):
+                ss.editing_match_id = None
+                st.rerun()
+        elif res.get('s1') is not None:
+            show_score()
+            if st.button("修正", key=f"ed_{m_id}"):
+                ss.editing_match_id = m_id
+                st.rerun()
+        elif left and right:
+            if st.button("入力", key=f"in_{m_id}"):
+                ss.editing_match_id = m_id
+                st.rerun()
+        else:
+            st.caption("対戦待ち（前のラウンドの結果待ち）")
+
 
 # ==========================================
-# 4. メイン処理
+# 7. メイン
 # ==========================================
-init_session_state()
+init_session()
 
 if check_password():
     is_admin = (st.session_state.auth_status == "admin")
-    
+    state = load_state()
+
+    head_l, head_r = st.columns([4, 1])
+    with head_l:
+        st.title(f"⚽ {state['app_title']}")
+    with head_r:
+        if st.button("🔄 更新", use_container_width=True):
+            load_state.clear()
+            st.rerun()
+        if st.button("ログアウト", use_container_width=True):
+            st.session_state.clear()
+            st.query_params.clear()
+            st.rerun()
+
     if is_admin:
-        with st.expander("⚙️ 管理者設定 (設定・リセット)", expanded=False):
-            st.markdown("##### タイトル設定")
-            if not st.session_state.edit_mode_title:
-                st.info(st.session_state.app_title)
-                if st.button("編集", key="btn_ti"): st.session_state.edit_mode_title=True; st.rerun()
-            else:
-                nt = st.text_input("タイトル", st.session_state.app_title)
-                if st.button("保存", key="sv_ti"): 
-                    st.session_state.app_title=nt; save_data_to_db(); st.session_state.edit_mode_title=False; st.rerun() # ★変更
-            
-            st.markdown("---")
-            
-            st.markdown("##### コート数設定")
-            if not st.session_state.edit_mode_court:
-                st.info(f"現在: {st.session_state.court_mode}")
-                if st.button("編集", key="btn_ct"): st.session_state.edit_mode_court=True; st.rerun()
-            else:
-                nc = st.radio("選択", ["4面", "3面"], index=0 if st.session_state.court_mode=="4面" else 1)
-                if st.button("保存", key="sv_ct"): 
-                    st.session_state.court_mode=nc; save_data_to_db(); st.session_state.edit_mode_court=False; st.rerun() # ★変更
-            
-            st.markdown("---")
-            
-            st.markdown("##### 時間・スケジュール設定")
-            if not st.session_state.edit_mode_settings:
-                st.write(f"開始 {st.session_state.start_time_hour}:{st.session_state.start_time_minute:02d}")
-                if st.button("編集", key="btn_tm"): st.session_state.edit_mode_settings=True; st.rerun()
-            else:
-                c1, c2, c3 = st.columns(3)
-                nh = c1.number_input("開始(時)", 0, 23, st.session_state.start_time_hour)
-                nm = c2.number_input("開始(分)", 0, 59, st.session_state.start_time_minute)
-                n_ld = c3.number_input("リーグ時間(分)", 1, 30, st.session_state.league_duration)
-                n_iv = c1.number_input("インターバル(分)", 0, 60, st.session_state.interval_duration)
-                n_td = c2.number_input("トーナメント時間(分)", 1, 30, st.session_state.tourn_duration)
-                if st.button("保存", key="sv_tm"):
-                    st.session_state.start_time_hour = nh; st.session_state.start_time_minute = nm
-                    st.session_state.league_duration = n_ld; st.session_state.interval_duration = n_iv
-                    st.session_state.tourn_duration = n_td
-                    save_data_to_db(); st.session_state.edit_mode_settings = False; st.rerun() # ★変更
-            
-            st.markdown("---")
-            
-            st.markdown("##### チーム名設定")
-            if not st.session_state.edit_mode_teams:
-                if st.button("編集", key="btn_te"): st.session_state.edit_mode_teams=True; st.rerun()
-            else:
-                t1, t2 = st.tabs(["ガチ", "MIX"])
-                with t1:
-                    with st.form("rt"):
-                        for c in "ABCDEFGHIJKL": st.session_state.teams_reg[c] = st.text_input(f"{c}", st.session_state.teams_reg[c])
-                        st.form_submit_button("保存")
-                with t2:
-                    with st.form("mt"):
-                        for c in "ABCDEFGHIJKL": st.session_state.teams_mix[c] = st.text_input(f"{c}", st.session_state.teams_mix[c])
-                        st.form_submit_button("保存")
-                if st.button("編集完了（保存）", key="en_te"): 
-                    save_data_to_db(); st.session_state.edit_mode_teams=False; st.rerun() # ★変更
+        admin_panel(state)
+        state = load_state()
 
-            # 5. データの完全初期化 (DB対応版)
-            st.markdown("---")
-            st.error("【危険】データの完全初期化")
-            st.caption("全ての試合結果、チーム名、設定を初期状態に戻します。データベースの記録も全て消去されます。")
-            confirm_pass = st.text_input("実行するにはリセット用パスワードを入力", type="password", key="reset_pass")
-            
-            if st.button("初期化を実行する", type="primary"):
-                if confirm_pass == RESET_PASS:
-                    try:
-                        default_data = {
-                            'app_title': "パテントカップ2025",
-                            'teams_reg': DEFAULT_TEAMS_REGULAR.copy(),
-                            'teams_mix': DEFAULT_TEAMS_MIX.copy(),
-                            'results': {},
-                            'tourn_results': {},
-                            'court_mode': "4面",
-                            'start_time_hour': 13,
-                            'start_time_minute': 15,
-                            'league_duration': 7,
-                            'tourn_duration': 10,
-                            'interval_duration': 15
-                        }
-                        
-                        # データベースを初期化
-                        conn = st.connection("postgresql", type="sql")
-                        with conn.session as s:
-                            s.execute(text("DELETE FROM patent_cup_logs;"))
-                            s.execute(
-                                text("INSERT INTO patent_cup_logs (log_type, log_data) VALUES (:type, CAST(:data AS JSONB));"),
-                                {"type": "init", "data": json.dumps(default_data, ensure_ascii=False)}
-                            )
-                            s.commit()
-                        
-                        load_data_from_db.clear()
-                        st.session_state.clear()
-                        st.query_params.clear()
-                        
-                        st.toast("✅ 全データを初期化しました")
-                        time.sleep(2)
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"初期化エラー: {e}")
-                else:
-                    st.error("パスワードが違います")
+    reg_done, reg_total = league_progress(state, "reg")
+    mix_done, mix_total = league_progress(state, "mix")
+    league_complete = (reg_done == reg_total and mix_done == mix_total)
 
-        if st.button("ログアウト", key="admin_logout"):
-            st.session_state.auth_status = None
-            st.query_params.clear()
-            st.rerun()
-            
+    # ★閲覧者はタブ2つ（スマホで確実に収まり、描画も軽い）
+    if is_admin:
+        tab_names = ["📊 順位表", "📝 リーグ入力", "🏆 決勝入力", "🌲 対戦表"]
+        tab1, tab2, tab3, tab4 = st.tabs(tab_names)
     else:
-        if st.button("ログアウト", key="viewer_logout"):
-            st.session_state.auth_status = None
-            st.query_params.clear()
-            st.rerun()
-
-    # === メインコンテンツ ===
-    st.title(f"⚽ {st.session_state.app_title}")
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 順位表", "📝 リーグ戦入力", "🏆 トーナメント入力", "🌲 トーナメント表"])
-    
-    df_reg = calculate_standings("reg")
-    df_mix = calculate_standings("mix")
+        tab1, tab4 = st.tabs(["📊 順位表", "🌲 対戦表"])
+        tab2 = tab3 = None
 
     with tab1:
-        common_cfg = {"チーム名": st.column_config.TextColumn("チーム名", width="medium")}
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("🟦 ガチリーグ")
-            st.dataframe(df_reg.style.background_gradient(subset=['勝点'], cmap='Blues').format(precision=0), hide_index=True, column_config=common_cfg)
-        with c2:
-            st.subheader("🟧 MIXリーグ")
-            st.dataframe(df_mix.style.background_gradient(subset=['勝点'], cmap='Oranges').format(precision=0), hide_index=True, column_config=common_cfg)
-
-    with tab2:
-        base_time = datetime(2025, 1, 1, st.session_state.start_time_hour, st.session_state.start_time_minute)
-        court_mode = st.session_state.court_mode
-        matches_to_show = []
-        if court_mode == "4面":
-            for i, slot in enumerate(SCHEDULE_TEMPLATE_4COURT):
-                matches_to_show.append({"time": base_time + timedelta(minutes=i*st.session_state.league_duration), "games": [
-                    {"type": "reg", "c": "A", "p": slot[0]}, {"type": "reg", "c": "B", "p": slot[1]},
-                    {"type": "mix", "c": "C", "p": slot[2]}, {"type": "mix", "c": "D", "p": slot[3]}
-                ]})
-            league_end_time = base_time + timedelta(minutes=9*st.session_state.league_duration)
+        if league_complete:
+            st.success(f"リーグ戦 入力完了（ガチ {reg_done}/{reg_total}・"
+                       f"MIX {mix_done}/{mix_total}）順位が確定しました。")
         else:
-            for i, slot in enumerate(SCHEDULE_TEMPLATE_3COURT):
-                games = []
-                for idx, m_info in enumerate(slot["matches"]):
-                    games.append({"type": m_info[0], "c": ["A","B","C"][idx], "p": (m_info[1], m_info[2])})
-                matches_to_show.append({"time": base_time + timedelta(minutes=i*st.session_state.league_duration), "games": games})
-            league_end_time = base_time + timedelta(minutes=12*st.session_state.league_duration)
+            st.info(f"リーグ戦 入力状況 … ガチ {reg_done}/{reg_total}・"
+                    f"MIX {mix_done}/{mix_total}")
+        df_reg = calculate_standings(state, "reg")
+        df_mix = calculate_standings(state, "mix")
+        cfg = {"チーム名": st.column_config.TextColumn("チーム名", width="medium")}
+        st.subheader("🟦 ガチリーグ")
+        st.dataframe(
+            df_reg.style.background_gradient(subset=['勝点'], cmap='Blues')
+                  .format(precision=0),
+            hide_index=True, column_config=cfg, use_container_width=True)
+        st.subheader("🟧 MIXリーグ")
+        st.dataframe(
+            df_mix.style.background_gradient(subset=['勝点'], cmap='Oranges')
+                  .format(precision=0),
+            hide_index=True, column_config=cfg, use_container_width=True)
 
-        for i, slot in enumerate(matches_to_show):
-            st.markdown(f"#### 第{i+1}試合帯 ({slot['time'].strftime('%H:%M')})")
-            cols = st.columns(len(slot['games']))
-            for idx, game in enumerate(slot['games']):
-                l_type, court, (home, away) = game['type'], game['c'], game['p']
-                match_key = f"{l_type}_{i}_{home}_{away}"
-                home_name = get_team_name(l_type, home); away_name = get_team_name(l_type, away)
-                
-                with cols[idx]:
-                    header_color = "#FFF0F5" if l_type == "mix" else "#E6F3FF"
-                    header_text = f"{court}コート (MIX)" if l_type == "mix" else f"{court}コート (ガチ)"
-                    
-                    with st.container(border=True):
-                        st.markdown(f"""<div style="background-color: {header_color}; padding: 8px; border-radius: 5px; margin-bottom: 10px; font-weight: bold;">{header_text}</div>""", unsafe_allow_html=True)
-                        st.write(f"**{home_name}** vs **{away_name}**")
-                        res = st.session_state.results.get(match_key, {'s1': None, 's2': None})
-                        if is_admin:
-                            if st.session_state.editing_match_id == match_key:
-                                c1, c2 = st.columns(2)
-                                v1 = c1.number_input("左", value=res['s1'] or 0, key=f"{match_key}_1", label_visibility="collapsed")
-                                v2 = c2.number_input("右", value=res['s2'] or 0, key=f"{match_key}_2", label_visibility="collapsed")
-                                b1, b2 = st.columns(2)
-                                if b1.button("確定", key=f"sv_{match_key}", type="primary"):
-                                    save_specific_match(match_key, {'s1': v1, 's2': v2}, is_tournament=False)
-                                    st.session_state.editing_match_id = None
-                                    st.rerun()
-                                if b2.button("中止", key=f"cn_{match_key}"): st.session_state.editing_match_id = None; st.rerun()
-                            else:
-                                if res['s1'] is not None:
-                                    st.markdown(f"### {res['s1']} - {res['s2']}")
-                                    if st.button("修正", key=f"ed_{match_key}"): st.session_state.editing_match_id = match_key; st.rerun()
-                                else:
-                                    if st.button("入力", key=f"in_{match_key}"): st.session_state.editing_match_id = match_key; st.rerun()
-                        else:
-                            st.write(f"### {res['s1']} - {res['s2']}" if res['s1'] is not None else "ー")
-            st.divider()
+    if is_admin:
+        with tab2:
+            league_tab(state, True)
 
-    with tab3:
-        tourn_start = league_end_time + timedelta(minutes=st.session_state.interval_duration)
-        st.info(f"🏆 トーナメント開始: {tourn_start.strftime('%H:%M')} (リーグ終了 {league_end_time.strftime('%H:%M')} + {st.session_state.interval_duration}分後)")
-        
-        reg_ranks = df_reg["チーム名"].tolist()
-        mix_ranks = df_mix["チーム名"].tolist()
-        schedule = TOURN_SCHED_4COURT if st.session_state.court_mode == "4面" else TOURN_SCHED_3COURT
-        
-        for idx_slot, slot in enumerate(schedule):
-            t_str = (tourn_start + timedelta(minutes=idx_slot * st.session_state.tourn_duration)).strftime('%H:%M')
-            st.markdown(f"#### ⏰ {t_str} - {slot['cup_display']}")
-            cols = st.columns(len(slot['games']))
-            for idx_game, game in enumerate(slot['games']):
-                with cols[idx_game]:
-                    m_id = f"{game['league']}_{game['cup']}_{game['round']}"
-                    team_list = reg_ranks if game['league']=="reg" else mix_ranks
-                    if game['round'].startswith("SF"):
-                        t_left = resolve_tournament_team(game['league'], game['cup'], "SF1" if game['round']=="SF1" else "SF2", team_list, "")
-                        t_right = resolve_tournament_team(game['league'], game['cup'], "SF1_Opp" if game['round']=="SF1" else "SF2_Opp", team_list, "")
-                    else:
-                        t_left = resolve_tournament_team(game['league'], game['cup'], game['round'], team_list, "")
-                        t_right = resolve_tournament_team(game['league'], game['cup'], f"{game['round']}_Opp", team_list, "")
-
-                    render_match_card(game['league'], f"{game['cup']} {game['round']}", m_id, t_left, t_right, game['court'], is_admin)
-            st.divider()
+        with tab3:
+            _, league_end, tourn_start = schedule_times(state)
+            st.info(f"🏆 トーナメント開始: {tourn_start.strftime('%H:%M')} "
+                    f"(リーグ終了 {league_end.strftime('%H:%M')} + "
+                    f"{state['interval_duration']}分後)")
+            if not league_complete:
+                st.warning(
+                    f"⚠️ リーグ戦がまだ全部入力されていません"
+                    f"（ガチ {reg_done}/{reg_total}・MIX {mix_done}/{mix_total}）。"
+                    "順位が未確定のため、この画面の組み合わせは変わる可能性があります。")
+            sched = (TOURN_SCHED_4COURT if state['court_mode'] == "4面"
+                     else TOURN_SCHED_3COURT)
+            for idx_slot, slot in enumerate(sched):
+                t_str = (tourn_start + timedelta(
+                    minutes=idx_slot * state['tourn_duration'])).strftime('%H:%M')
+                st.markdown(f"#### ⏰ {t_str} - {slot['cup_display']}")
+                cols = st.columns(len(slot['games']))
+                for idx_game, game in enumerate(slot['games']):
+                    with cols[idx_game]:
+                        tourn_card(state, game, True)
+                st.divider()
 
     with tab4:
         st.header("決勝トーナメント表")
-        reg_ranks_list = df_reg["チーム名"].tolist()
-        mix_ranks_list = df_mix["チーム名"].tolist()
-
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("🟦 ガチリーグ")
-            render_graphviz_bracket("Champions", reg_ranks_list, "reg", "🟦 パテントチャンピオンズカップ")
-            render_graphviz_bracket("Elite", reg_ranks_list, "reg", "🟦 パテントエリートカップ")
-            render_graphviz_bracket("Classical", reg_ranks_list, "reg", "🟦 パテントクラシカルカップ")
-        with c2:
-            st.subheader("🟧 MIXリーグ")
-            render_graphviz_bracket("Champions", mix_ranks_list, "mix", "🟧 パテントチャンピオンズカップMIX")
-            render_graphviz_bracket("Elite", mix_ranks_list, "mix", "🟧 パテントエリートカップMIX")
-            render_graphviz_bracket("Classical", mix_ranks_list, "mix", "🟧 パテントクラシカルカップMIX")
+        if not league_complete:
+            st.caption("※ リーグ戦の全結果が入力されると順位が確定します。")
+        st.markdown("### 🟦 ガチリーグ")
+        for cup in ("Champions", "Elite", "Classical"):
+            render_bracket(state, "reg", cup)
+        st.markdown("### 🟧 MIXリーグ")
+        for cup in ("Champions", "Elite", "Classical"):
+            render_bracket(state, "mix", cup)
