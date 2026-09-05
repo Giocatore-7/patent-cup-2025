@@ -46,6 +46,15 @@ st.markdown("""
     }
     .stTabs [data-baseweb="tab-list"] > button[aria-label] { display: none !important; }
 
+    /* ★iOS対策: 入力欄の文字が16px未満だと、iPhoneはタップ時に画面を自動拡大する。
+       16px以上にしておけば拡大が起きない。Androidには影響なし。 */
+    input, textarea, select,
+    .stTextInput input, .stNumberInput input, .stTextArea textarea,
+    [data-baseweb="input"] input, [data-baseweb="base-input"] input {
+        font-size: 16px !important;
+    }
+    html { -webkit-text-size-adjust: 100%; }
+
     @media (max-width: 520px) {
         .stTabs [data-baseweb="tab-list"] { gap: 1px !important; }
         .stTabs [data-baseweb="tab"] {
