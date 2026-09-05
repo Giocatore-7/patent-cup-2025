@@ -33,11 +33,13 @@ st.markdown("""
     footer { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
 
-    /* ★表の上に出るツールバー（検索・CSVダウンロード・全画面）を隠す。
+    /* ★表の上に出るツールバー（検索・CSVダウンロード・全画面）ごと隠す。
        閲覧者が誤タップして「ダウンロードしますか?」と聞かれ、驚くのを防ぐため。
+       全画面表示はスマホを横向きにすれば代替できるので、まとめて非表示にする。
        Streamlitのバージョン差を吸収するため複数の指定を併記している。 */
     [data-testid="stElementToolbar"],
     [data-testid="stElementToolbarButtonContainer"],
+    [data-testid="StyledFullScreenButton"],
     [data-testid="stToolbarActions"] { display: none !important; }
 
     .stTabs [data-baseweb="tab-list"] {
@@ -1019,7 +1021,7 @@ if check_password():
 
     # ★タブは全員4つ（閲覧者も見られる。ただし編集はできない）
     tab1, tab2, tab3, tab4 = st.tabs(
-        ["📊 順位表", "📝 リーグ戦", "🏆 決勝戦", "🌲 対戦表"])
+        ["📊 順位表", "📝 リーグ戦", "🏆 決勝戦", "🌲 トーナメント表"])
 
     with tab1:
         if league_complete:
