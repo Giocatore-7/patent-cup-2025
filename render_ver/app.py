@@ -33,6 +33,13 @@ st.markdown("""
     footer { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
 
+    /* ★表の上に出るツールバー（検索・CSVダウンロード・全画面）を隠す。
+       閲覧者が誤タップして「ダウンロードしますか?」と聞かれ、驚くのを防ぐため。
+       Streamlitのバージョン差を吸収するため複数の指定を併記している。 */
+    [data-testid="stElementToolbar"],
+    [data-testid="stElementToolbarButtonContainer"],
+    [data-testid="stToolbarActions"] { display: none !important; }
+
     .stTabs [data-baseweb="tab-list"] {
         gap: 4px !important;
         overflow-x: visible !important;
